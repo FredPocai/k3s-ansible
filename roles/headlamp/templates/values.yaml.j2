@@ -1,0 +1,33 @@
+# Headlamp Helm values
+# Rendered by Ansible from roles/k8s-dashboard/templates/values.yaml.j2
+
+replicaCount: 1
+
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: headlamp-basic-auth
+    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"    
+  hosts:
+    - host: headlamp.{{ base_domain }}
+      paths:
+        - path: /
+          type: Prefix
+  tls:
+    - hosts:
+        - headlamp.{{ base_domain }}
+      secretName: headlamp-tls
+
+extraManifests: 
+  - |
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: headlamp-basic-auth
+      namespace: headlamp
+    data:
+      auth: {{ lookup('file', 'htpasswd') | b64encode }}

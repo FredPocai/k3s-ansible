@@ -1,0 +1,13 @@
+---
+# roles/k3s-server/tasks/main.yml
+# Installs k3s in server mode.
+# The init node bootstraps etcd; join nodes connect to it.
+# All three end up as full control-plane nodes.
+
+- name: Include init tasks (k3s211 only)
+  include_tasks: init.yml
+  when: inventory_hostname in groups['k3s_init']
+
+- name: Include join tasks (k3s212, k3s213)
+  include_tasks: join.yml
+  when: inventory_hostname in groups['k3s_join']

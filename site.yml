@@ -1,0 +1,113 @@
+---
+# site.yml — k3s homelab cluster deployment
+#
+# Usage:
+#   Full deploy:        ansible-playbook -i inventory/hosts.yml site.yml --ask-vault-pass
+#   Single tag:         ansible-playbook -i inventory/hosts.yml site.yml --tags <tag> --ask-vault-pass
+#
+# Tags: prereqs, k3s, calico, cert-manager, longhorn, ingress, dashboard
+#
+# Vault: copy vault/secrets.example.yml → vault/secrets.yml, fill in values, then encrypt. cloudflare_api_token, opnsense_api_key,
+#        opnsense_api_secret. Encrypt before committing:
+#          ansible-vault encrypt vault/secrets.yml
+
+# Load vault secrets into all plays
+- name: Load vault secrets
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Include vault secrets
+      ansible.builtin.include_vars:
+        file: vault/secrets.yml
+      tags: always
+
+# ── Phase 1: System prerequisites (all nodes in parallel) ─────────
+- name: Prepare all nodes
+  hosts: k3s_cluster
+  become: true
+  gather_facts: true
+  tags: [prereqs]
+  roles:
+    - prereqs
+
+# ── Phase 2: Bootstrap init node ──────────────────────────────────
+- name: Bootstrap k3s init node (k3s211)
+  hosts: k3s_init
+  become: true
+  gather_facts: false
+  tags: [k3s]
+  roles:
+    - k3s-server
+
+# ── Phase 3: Join remaining nodes ─────────────────────────────────
+- name: Join k3s nodes to cluster (k3s212, k3s213)
+  hosts: k3s_join
+  become: true
+  gather_facts: false
+  serial: 1
+  tags: [k3s]
+  roles:
+    - k3s-server
+
+# ── Phase 4: Calico CNI ───────────────────────────────────────────
+- name: Install Calico
+  hosts: k3s_init
+  become: true
+  gather_facts: false
+  tags: [calico]
+  roles:
+    - calico
+
+# ── Phase 5: cert-manager ─────────────────────────────────────────
+- name: Install cert-manager with Cloudflare DNS-01
+  hosts: k3s_init
+  become: true
+  gather_facts: false
+  tags: [cert-manager]
+  vars_files:
+    - vault/secrets.yml
+  roles:
+    - cert-manager
+
+# ── Phase 6: Longhorn ─────────────────────────────────────────────
+- name: Install Longhorn distributed storage
+  hosts: k3s_init
+  become: true
+  gather_facts: false
+  tags: [longhorn]
+  roles:
+    - longhorn
+
+# ── Phase 7: ingress-nginx ────────────────────────────────────────
+- name: Install ingress-nginx
+  hosts: k3s_init
+  become: true
+  gather_facts: false
+  tags: [ingress]
+  roles:
+    - ingress-nginx
+
+# ── Phase 8: Headlamp dashboard ───────────────────────────────────
+- name: Install Headlamp dashboard
+  hosts: k3s_init
+  become: true
+  gather_facts: false
+  tags: [dashboard]
+  vars_files:
+    - vault/secrets.yml
+  roles:
+    - k8s-dashboard
+
+# ── Phase 9: OPNsense — HAProxy, ACME, Unbound ───────────────────
+# Runs entirely from localhost (delegate_to: localhost).
+# Installs os-haproxy + os-acme, configures TLS passthrough for all
+# k3s_services + fw.{{ base_domain }}, registers Unbound entries.
+# Safe to re-run: all tasks are idempotent (check-before-create).
+- name: Configure OPNsense HAProxy, ACME, and Unbound
+  hosts: k3s_init
+  gather_facts: false
+  tags: [opnsense]
+  vars_files:
+    - vault/secrets.yml
+  roles:
+    - opnsense

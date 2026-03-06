@@ -1,0 +1,20 @@
+# Longhorn Helm values
+# Rendered by Ansible from roles/longhorn/templates/values.yaml.j2
+
+defaultSettings:
+  defaultDataPath: {{ longhorn_data_path }}
+  storageReservedPercentageForDefaultDisk: 10
+  replicaSoftAntiAffinity: true
+  defaultReplicaCount: 3
+
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  host: longhorn.{{ base_domain }}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  tls: true
+  tlsSecret: longhorn-tls
+
+persistence:
+  defaultClassReplicaCount: 3

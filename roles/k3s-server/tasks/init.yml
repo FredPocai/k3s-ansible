@@ -1,0 +1,99 @@
+---
+# roles/k3s-server/tasks/init.yml
+# Runs only on k3s211 — bootstraps the embedded etcd cluster.
+
+- name: Check if k3s is already installed
+  stat:
+    path: /usr/local/bin/k3s
+  register: k3s_binary
+
+- name: Download k3s install script
+  get_url:
+    url: https://get.k3s.io
+    dest: /tmp/k3s-install.sh
+    mode: "0755"
+  when: not k3s_binary.stat.exists
+
+- name: Install k3s (init node — cluster-init bootstraps etcd)
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version | default('') }}"
+    INSTALL_K3S_EXEC: >-
+      server
+      --cluster-init
+      --node-name {{ inventory_hostname }}
+      --node-ip {{ ansible_host }}
+      --advertise-address {{ ansible_host }}
+      --bind-address {{ ansible_host }}
+      --flannel-backend=none
+      --disable-network-policy
+      --disable traefik
+      --disable servicelb
+      --disable local-storage
+      --cluster-cidr {{ k3s_cluster_cidr }}
+      --service-cidr {{ k3s_service_cidr }}
+      --cluster-dns {{ k3s_cluster_dns }}
+      --write-kubeconfig-mode 644
+  command: /tmp/k3s-install.sh
+  when: not k3s_binary.stat.exists
+  notify: Restart k3s
+
+- name: Wait for k3s to be ready on init node
+  wait_for:
+    port: 6443
+    host: "{{ ansible_host }}"
+    delay: 10
+    timeout: 120
+
+- name: Wait for node-token to exist
+  wait_for:
+    path: "{{ k3s_token_path }}"
+    timeout: 60
+
+- name: Fetch node-token to Ansible controller
+  fetch:
+    src: "{{ k3s_token_path }}"
+    dest: "{{ k3s_token_local }}"
+    flat: true
+
+- name: Fetch kubeconfig to Ansible controller
+  fetch:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: /tmp/k3s-homelab.yaml
+    flat: true
+
+# Fix the server address in the kubeconfig (k3s writes 127.0.0.1 by default)
+- name: Patch kubeconfig server address on controller
+  ansible.builtin.replace:
+    path: /tmp/k3s-homelab.yaml
+    regexp: 'https://127\.0\.0\.1:6443'
+    replace: "https://{{ k3s_init_ip }}:6443"
+  delegate_to: localhost
+
+# Fix CoreDNS to use explicit upstream resolver instead of inheriting
+# /etc/resolv.conf from the node. Without this, the node's search domain
+# .homelab.internal) bleeds into pod DNS, causing api.cloudflare.com to resolve
+# as api.cloudflare.com.homelab.internal → your public IP → connection refused.
+- name: Patch CoreDNS to use explicit upstream DNS instead of /etc/resolv.conf
+  ansible.builtin.shell: |
+    kubectl get configmap coredns -n kube-system -o yaml \
+      | sed 's|forward . /etc/resolv.conf|forward . {{ opnsense_host }}|' \
+      | kubectl apply -f -
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: coredns_patch
+  changed_when: '"configured" in coredns_patch.stdout'
+
+- name: Restart CoreDNS to apply forward change
+  ansible.builtin.command: >
+    kubectl rollout restart deployment/coredns -n kube-system
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  when: coredns_patch.changed
+
+- name: Wait for CoreDNS rollout to complete
+  ansible.builtin.command: >
+    kubectl rollout status deployment/coredns
+    -n kube-system --timeout=60s
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+

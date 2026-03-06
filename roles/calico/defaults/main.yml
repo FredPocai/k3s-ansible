@@ -1,0 +1,4 @@
+# ── Calico ────────────────────────────────────────────────────────
+calico_version: "v3.31.4"
+calico_ebpf_enabled: false
+calico_bgp_enabled: false

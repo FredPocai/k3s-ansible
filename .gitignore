@@ -1,0 +1,17 @@
+# Real vault — ignore unless encrypted
+# Copy vault/secrets.example.yml → vault/secrets.yml, fill in values
+# Run: ansible-vault encrypt vault/secrets.yml  before committing
+vault/secrets.yml
+
+# Python / Ansible artifacts
+*.pyc
+__pycache__/
+.ansible/
+*.retry
+group_vars/all.yml
+auth
+group_vars/*.yml
+group_vars/*.yaml
+inventory/*.yaml
+inventory/*.yml
+roles/files/htpasswd

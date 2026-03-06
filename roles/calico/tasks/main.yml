@@ -1,0 +1,143 @@
+---
+# roles/calico/tasks/main.yml
+# Installs Calico via the Tigera operator.
+# Runs from the init node (k3s211) only — kubectl applies are cluster-wide.
+
+- name: Only run Calico install from init node
+  when: inventory_hostname in groups['k3s_init']
+  block:
+
+    - name: Apply Tigera operator CRDs first
+      command: >
+        kubectl apply --server-side --force-conflicts -f
+        https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/operator-crds.yaml
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Apply Tigera operator manifest
+      command: >
+        kubectl apply -f
+        https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    # Wait for the operator pod to be Running first
+    - name: Wait for Tigera operator pod to be Running
+      command: >
+        kubectl rollout status deployment/tigera-operator
+        -n tigera-operator --timeout=120s
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    # The operator registers CRDs after it starts — we must wait for the
+    # Installation CRD specifically before trying to apply the CR.
+    # Without this, kubectl apply fails with "server doesn't have resource type".
+    - name: Wait for Installation CRD to be registered by operator
+      command: kubectl get crd installations.operator.tigera.io
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: crd_check
+      until: crd_check.rc == 0
+      retries: 30
+      delay: 10
+
+    - name: Wait for APIServer CRD to be registered by operator
+      command: kubectl get crd apiservers.operator.tigera.io
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: crd_apiserver_check
+      until: crd_apiserver_check.rc == 0
+      retries: 30
+      delay: 10
+
+    - name: Apply Calico Installation and APIServer CRs
+      copy:
+        dest: /tmp/calico-installation.yaml
+        content: |
+          apiVersion: operator.tigera.io/v1
+          kind: Installation
+          metadata:
+            name: default
+          spec:
+            calicoNetwork:
+              ipPools:
+                - name: default-ipv4-pool
+                  cidr: {{ k3s_cluster_cidr }}
+                  encapsulation: None
+                  natOutgoing: Enabled
+                  nodeSelector: all()
+          ---
+          apiVersion: operator.tigera.io/v1
+          kind: APIServer
+          metadata:
+            name: default
+          spec: {}
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Apply Calico Installation CR
+      command: kubectl apply -f /tmp/calico-installation.yaml
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    # Wait for tigerastatus to exist and report healthy before proceeding
+    - name: Wait for tigerastatus CRD to be available
+      command: kubectl get crd tigerastatuses.operator.tigera.io
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: tigera_status_crd
+      until: tigera_status_crd.rc == 0
+      retries: 30
+      delay: 10
+
+    - name: Wait for calico-system tigerastatus to report Available
+      command: >
+        kubectl wait tigerastatus/calico
+        --for=condition=Available
+        --timeout=300s
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Wait for all nodes to become Ready
+      command: >
+        kubectl wait nodes --all
+        --for=condition=Ready
+        --timeout=300s
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Confirm node status
+      command: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: node_status
+
+    - name: Print node status
+      debug:
+        msg: "{{ node_status.stdout_lines }}"
+
+    # ── BGP configuration (disabled by default) ───────────────────
+    # When you're ready to peer with OPNsense/FRR:
+    #   1. Install FRR plugin on OPNsense
+    #   2. Set calico_bgp_enabled: true in group_vars/all.yml
+    #   3. Re-run this role with --tags calico
+    #   4. Configure BGPPeer resources pointing at OPNsense LAN IP
+    #
+    # Example BGPPeer manifest (apply manually or add a task here):
+    #
+    # apiVersion: projectcalico.org/v3
+    # kind: BGPPeer
+    # metadata:
+    #   name: opnsense-peer
+    # spec:
+    #   peerIP: 192.168.x.1      # OPNsense internal interface IP
+    #   asNumber: 65000           # OPNsense AS
+    # ---
+    # apiVersion: projectcalico.org/v3
+    # kind: BGPConfiguration
+    # metadata:
+    #   name: default
+    # spec:
+    #   logSeverityScreen: Info
+    #   nodeToNodeMeshEnabled: true
+    #   asNumber: 65001           # k3s cluster AS

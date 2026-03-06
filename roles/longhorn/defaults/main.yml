@@ -1,0 +1,5 @@
+# ── Longhorn ──────────────────────────────────────────────────────
+longhorn_version: "1.6.2"
+longhorn_namespace: longhorn-system
+longhorn_aux_device: /dev/sdb
+longhorn_data_path: /var/lib/longhorn

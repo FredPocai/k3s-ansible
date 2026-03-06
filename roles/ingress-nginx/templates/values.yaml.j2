@@ -1,0 +1,20 @@
+# ingress-nginx Helm values
+# Rendered by Ansible from roles/ingress-nginx/templates/values.yaml.j2
+#
+# DaemonSet with hostNetwork — binds ports 80/443 directly on each node's
+# 192.168.x.x IP. No LoadBalancer needed; point OPNsense/Caddy at any node.
+
+controller:
+  kind: DaemonSet
+  hostNetwork: true
+  hostPort:
+    enabled: true
+  service:
+    type: ClusterIP
+  metrics:
+    enabled: true
+  config:
+    # Allow real client IPs when behind OPNsense/Caddy
+    use-forwarded-headers: "true"
+    compute-full-forwarded-for: "true"
+    use-proxy-protocol: "false"

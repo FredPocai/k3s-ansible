@@ -1,0 +1,55 @@
+---
+# roles/ingress-nginx/tasks/main.yml
+# Installs ingress-nginx via Helm as a DaemonSet with hostNetwork.
+# nginx binds directly to ports 80/443 on each node's 192.168.x.x IP.
+# Point OPNsense Caddy or DNS round-robin at 192.168.x.211-213.
+
+- name: Only run ingress-nginx install from init node
+  when: inventory_hostname in groups['k3s_init']
+  block:
+
+    - name: Add ingress-nginx Helm repo
+      ansible.builtin.command: helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: repo_add
+      changed_when: '"already exists" not in repo_add.stdout'
+
+    - name: Update Helm repos
+      ansible.builtin.command: helm repo update
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+
+    - name: Render ingress-nginx values.yaml
+      ansible.builtin.template:
+        src: values.yaml.j2
+        dest: /tmp/ingress-nginx-values.yaml
+        mode: "0600"
+
+    - name: Deploy ingress-nginx via Helm
+      ansible.builtin.command: >
+        helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx
+        --namespace {{ ingress_nginx_namespace }}
+        --create-namespace
+        --version {{ ingress_nginx_chart_version }}
+        -f /tmp/ingress-nginx-values.yaml
+        --wait --timeout 5m
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Verify ingress-nginx pods are running
+      ansible.builtin.command: kubectl get pods -n {{ ingress_nginx_namespace }}
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: nginx_pods
+      changed_when: false
+
+    - name: Print ingress-nginx pod status
+      ansible.builtin.debug:
+        msg: "{{ nginx_pods.stdout_lines }}"
+
+    - name: Clean up rendered values file
+      ansible.builtin.file:
+        path: /tmp/ingress-nginx-values.yaml
+        state: absent

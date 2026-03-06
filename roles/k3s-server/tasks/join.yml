@@ -1,0 +1,52 @@
+---
+# roles/k3s-server/tasks/join.yml
+# Runs on k3s212 and k3s213 — joins the existing etcd cluster.
+
+- name: Check if k3s is already installed
+  stat:
+    path: /usr/local/bin/k3s
+  register: k3s_binary
+
+- name: Read token from Ansible controller
+  set_fact:
+    k3s_token: "{{ lookup('file', k3s_token_local) | trim }}"
+  when: not k3s_binary.stat.exists
+
+- name: Download k3s install script
+  get_url:
+    url: https://get.k3s.io
+    dest: /tmp/k3s-install.sh
+    mode: "0755"
+  when: not k3s_binary.stat.exists
+
+- name: Install k3s (join node — connects to init node)
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version | default('') }}"
+    K3S_TOKEN: "{{ k3s_token }}"
+    INSTALL_K3S_EXEC: >-
+      server
+      --server {{ k3s_init_ip }}
+      --node-name {{ inventory_hostname }}
+      --node-ip {{ ansible_host }}
+      --advertise-address {{ ansible_host }}
+      --bind-address {{ ansible_host }}
+      --flannel-backend=none
+      --disable-network-policy
+      --disable traefik
+      --disable servicelb
+      --disable local-storage
+      --cluster-cidr {{ k3s_cluster_cidr }}
+      --service-cidr {{ k3s_service_cidr }}
+      --cluster-dns {{ k3s_cluster_dns }}
+      --write-kubeconfig-mode 644
+  command: /tmp/k3s-install.sh
+  when: not k3s_binary.stat.exists
+  notify: Restart k3s
+
+- name: Wait for k3s to be ready on join node
+  wait_for:
+    port: 6443
+    host: "{{ ansible_host }}"
+    delay: 10
+    timeout: 120
+

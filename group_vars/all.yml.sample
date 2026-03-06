@@ -1,0 +1,58 @@
+# ── Connection ────────────────────────────────────────────────────
+ansible_user: username
+ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+ansible_python_interpreter: /usr/bin/python3
+
+# ── Network interfaces ────────────────────────────────────────────
+k3s_iface: enp6s18                              # Internal network (192.168.x.0/24) — cluster traffic
+storage_iface: enp6s19                          # Storage network (192.168.1xx.0/24) — Longhorn + NFS/iSCSI
+k3s_gateway: 192.168.1xx.254                    # OPNsense LAN physical IP — default gateway
+
+# ── Domain ────────────────────────────────────────────────────────
+base_domain: homelab.internal                   # Base domain — services exposed as <n>.{{ base_domain }}
+
+# ── OPNsense ──────────────────────────────────────────────────────
+opnsense_host: "192.168.x.254"                  # IP used to reach OPNsense
+opnsense_lan_ip: "192.168.x.254"                # LAN IP HAProxy frontends bind to
+
+opnsense_api_base: "http://192.168.x.254:8080"  # OPNsense GUI currently HTTP on :8080
+                                                # Upda  te to https://<host>:8443 after
+                                                # confirming fw.{{ base_domain }} works
+                                                # opnsense_api_key, opnsense_api_secret → vault
+
+# ── ACME / cert-manager ───────────────────────────────────────────
+acme_email: "acme-certs@homelab.internal"
+certmanager_version: ""                                 # empty = latest stable; pin e.g. "v1.15.0"
+cloudflare_zone_id: "abcdefghijklmnopqrstuvwxyz123456"  # cloudflare_api_token → vault
+
+# ── k3s nodes (for HAProxy backend pool) ─────────────────────────
+k3s_nodes:
+  - { name: k3s211, ip: "192.168.x.211", storage_ip: 192.168.1xx.211 }
+  - { name: k3s212, ip: "192.168.x.212", storage_ip: 192.168.1xx.212 }
+  - { name: k3s213, ip: "192.168.x.213", storage_ip: 192.168.1xx.213 }
+
+k3s_init_ip: "192.168.x.211"
+
+# ── Internal services — Unbound + HAProxy SNI + k3s Ingress ───────
+# Each entry registers in Unbound, gets a HAProxy SNI route, and should
+# have a corresponding Ingress in k3s with a letsencrypt-production cert.
+# To add a new service: append one line and re-run --tags opnsense.
+k3s_services:
+  - { name: headlamp, hostname: "headlamp.homelab.internal" }
+  - { name: longhorn, hostname: "longhorn.homelab.internal" }
+
+# ── k3s ───────────────────────────────────────────────────────────
+k3s_version: ""
+k3s_config_dir: /etc/rancher/k3s
+k3s_data_dir: /var/lib/rancher/k3s
+k3s_token_path: /var/lib/rancher/k3s/server/node-token
+k3s_token_local: /tmp/k3s-homelab-token
+k3s_cluster_cidr: "10.42.0.0/16"
+k3s_service_cidr: "10.43.0.0/16"
+k3s_cluster_dns:  "10.43.0.10"
+
+
+
+
+
+

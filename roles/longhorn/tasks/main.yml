@@ -1,0 +1,82 @@
+---
+# roles/longhorn/tasks/main.yml
+# Installs Longhorn via Helm using a rendered values.yaml.
+# Longhorn replication traffic is directed to the storage interface (enp6s19).
+# UI is exposed at https://longhorn.{{ base_domain }}
+
+- name: Only run Longhorn install from init node
+  when: inventory_hostname in groups['k3s_init']
+  block:
+
+    - name: Install Helm if not present
+      ansible.builtin.shell: |
+        if ! command -v helm &>/dev/null; then
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        fi
+      args:
+        executable: /bin/bash
+
+    - name: Add Longhorn Helm repo
+      ansible.builtin.command: helm repo add longhorn https://charts.longhorn.io
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: repo_add
+      changed_when: '"already exists" not in repo_add.stdout'
+
+    - name: Update Helm repos
+      ansible.builtin.command: helm repo update
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+
+    - name: Render Longhorn values.yaml
+      ansible.builtin.template:
+        src: values.yaml.j2
+        dest: /tmp/longhorn-values.yaml
+        mode: "0600"
+
+    - name: Deploy Longhorn via Helm
+      ansible.builtin.command: >
+        helm upgrade --install longhorn longhorn/longhorn
+        --namespace {{ longhorn_namespace }}
+        --create-namespace
+        --version {{ longhorn_version }}
+        -f /tmp/longhorn-values.yaml
+        --wait --timeout 10m
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Annotate nodes with storage network IP for Longhorn replication
+      ansible.builtin.command: >
+        kubectl annotate node {{ item.name }}
+        storage.longhorn.io/ip={{ item.storage_ip }}
+        --overwrite
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      loop: "{{ k3s_nodes }}"
+
+    - name: Wait for Longhorn pods to be ready
+      ansible.builtin.command: >
+        kubectl wait pods
+        --for=condition=Ready
+        --all
+        -n {{ longhorn_namespace }}
+        --timeout=600s
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Verify Longhorn StorageClass is present
+      ansible.builtin.command: kubectl get storageclass longhorn
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: sc_check
+      changed_when: false
+
+    - name: Print StorageClass status
+      ansible.builtin.debug:
+        msg: "{{ sc_check.stdout }}"
+
+    - name: Clean up rendered values file
+      ansible.builtin.file:
+        path: /tmp/longhorn-values.yaml
+        state: absent

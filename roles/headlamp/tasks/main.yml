@@ -1,0 +1,192 @@
+---
+# roles/k8s-dashboard/tasks/main.yml
+# Installs Headlamp via Helm using a rendered values.yaml.
+# Registers headlamp.{{ base_domain }} in OPNsense Unbound for split-horizon DNS.
+#
+# Note: kubernetes/dashboard was archived Jan 2026. Headlamp is the replacement.
+#
+# Access: https://headlamp.{{ base_domain }}
+# Retrieve login token:
+#   kubectl get secret headlamp-admin-token -n headlamp \
+#     -o jsonpath='{.data.token}' | base64 -d
+
+- name: Only run Headlamp install from init node
+  when: inventory_hostname in groups['k3s_init']
+  block:
+
+    - name: Add Headlamp Helm repo
+      ansible.builtin.command: helm repo add headlamp https://kubernetes-sigs.github.io/headlamp/
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: repo_add
+      changed_when: '"already exists" not in repo_add.stdout'
+
+    - name: Update Helm repos
+      ansible.builtin.command: helm repo update
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+
+    - name: Render Headlamp values.yaml
+      ansible.builtin.template:
+        src: values.yaml.j2
+        dest: /tmp/headlamp-values.yaml
+        mode: "0600"
+
+    - name: Deploy Headlamp via Helm
+      ansible.builtin.command: >
+        helm upgrade --install headlamp headlamp/headlamp
+        --namespace headlamp
+        --create-namespace
+        -f /tmp/headlamp-values.yaml
+        --wait --timeout 5m
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Apply Headlamp admin ServiceAccount, ClusterRoleBinding, and token Secret
+      ansible.builtin.shell: |
+        kubectl apply -f - <<EOF
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: headlamp-admin
+          namespace: headlamp
+        ---
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: headlamp-admin
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: cluster-admin
+        subjects:
+          - kind: ServiceAccount
+            name: headlamp-admin
+            namespace: headlamp
+        ---
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: headlamp-pod-admin
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: cluster-admin
+        subjects:
+          - kind: ServiceAccount
+            name: headlamp
+            namespace: headlamp
+        ---
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: headlamp-admin-token
+          namespace: headlamp
+          annotations:
+            kubernetes.io/service-account.name: headlamp-admin
+        type: kubernetes.io/service-account-token
+        EOF
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Wait for headlamp-admin-token to be populated
+      ansible.builtin.command: >
+        kubectl get secret headlamp-admin-token -n headlamp
+        -o jsonpath='{.data.token}'
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: token_check
+      until: token_check.stdout | length > 0
+      retries: 12
+      delay: 5
+      changed_when: false
+
+    - name: Decode login token
+      ansible.builtin.shell: >
+        kubectl get secret headlamp-admin-token -n headlamp
+        -o jsonpath='{.data.token}' | base64 -d
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: headlamp_token
+      changed_when: false
+
+    # ── OPNsense Unbound registration ─────────────────────────────
+    - name: Check if Unbound host override for headlamp already exists
+      ansible.builtin.uri:
+        url: "https://{{ opnsense_host }}/api/unbound/host_overrides/searchHostOverride"
+        method: GET
+        user: "{{ opnsense_api_key }}"
+        password: "{{ opnsense_api_secret }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: true
+      register: unbound_existing
+      delegate_to: localhost
+
+    - name: Set fact — headlamp override exists
+      ansible.builtin.set_fact:
+        headlamp_override_exists: >-
+          {{
+            unbound_existing.json.rows
+            | selectattr('hostname', 'equalto', 'headlamp')
+            | selectattr('domain', 'equalto', base_domain)
+            | list | length > 0
+          }}
+
+    - name: Add headlamp.{{ base_domain }} Unbound host override
+      ansible.builtin.uri:
+        url: "https://{{ opnsense_host }}/api/unbound/host_overrides/addHostOverride"
+        method: POST
+        user: "{{ opnsense_api_key }}"
+        password: "{{ opnsense_api_secret }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          host:
+            enabled: "1"
+            hostname: headlamp
+            domain: "{{ base_domain }}"
+            server: "{{ haproxy_vip | default(k3s_init_ip) }}"
+            description: "headlamp k3s dashboard — managed by Ansible"
+        status_code: [200, 201]
+      delegate_to: localhost
+      when: not headlamp_override_exists
+
+    - name: Apply Unbound configuration
+      ansible.builtin.uri:
+        url: "https://{{ opnsense_host }}/api/unbound/service/reconfigure"
+        method: POST
+        user: "{{ opnsense_api_key }}"
+        password: "{{ opnsense_api_secret }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body: {}
+        status_code: [200]
+      delegate_to: localhost
+      when: not headlamp_override_exists
+
+    - name: Clean up rendered values file
+      ansible.builtin.file:
+        path: /tmp/headlamp-values.yaml
+        state: absent
+
+    - name: Print Headlamp access info
+      ansible.builtin.debug:
+        msg:
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "  Headlamp is ready."
+          - "  URL:    https://headlamp.{{ base_domain }}"
+          - "  DNS:    headlamp.{{ base_domain }} → {{ haproxy_vip | default(k3s_init_ip) }} (Unbound)"
+          - "  Login:  select 'Token' and paste:"
+          - "  {{ headlamp_token.stdout }}"
+          - "  Retrieve later:"
+          - "  kubectl get secret headlamp-admin-token -n headlamp \\"
+          - "    -o jsonpath='{.data.token}' | base64 -d"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
