@@ -96,7 +96,7 @@
   vars_files:
     - vault/secrets.yml
   roles:
-    - k8s-dashboard
+    - headlamp
 
 # ── Phase 9: OPNsense — HAProxy, ACME, Unbound ───────────────────
 # Runs entirely from localhost (delegate_to: localhost).
