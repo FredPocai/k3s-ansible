@@ -13,7 +13,7 @@
 #   os-caddy — replaced by HAProxy; suppresses "missing plugin" GUI warning
 #
 # API notes:
-#   Detection: GET /api/core/firmware/packages -> {"rows": [...]}
+#   Detection: GET /api/core/firmware/info -> {"rows": [...]}
 #              (NOT /api/core/firmware/info which returns product metadata only)
 #   Install:   POST /api/core/firmware/install/<name>  body: ""
 #   Remove:    POST /api/core/firmware/remove/<name>   body: ""
@@ -22,7 +22,7 @@
 
 - name: Get list of installed packages/plugins
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/core/firmware/packages"
+    url: "{{ opnsense_api_base }}/api/core/firmware/info"
     method: GET
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"

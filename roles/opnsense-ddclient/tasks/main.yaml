@@ -42,7 +42,7 @@
 
 - name: Get list of installed packages/plugins
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/core/firmware/packages"
+    url: "{{ opnsense_api_base }}/api/core/firmware/info"
     method: GET
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -130,7 +130,7 @@
 
 - name: Get existing ddclient accounts
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/ddclient/accounts/searchAccount"
+    url: "{{ opnsense_api_base }}/api/dyndns/accounts/search_item"
     method: GET
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -143,7 +143,7 @@
 
 - name: Create Cloudflare DynDNS account for each public hostname
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/ddclient/accounts/addAccount"
+    url: "{{ opnsense_api_base }}/api/dyndns/accounts/add_item"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -175,7 +175,7 @@
 
 - name: Apply ddclient configuration
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/ddclient/service/reconfigure"
+    url: "{{ opnsense_api_base }}/api/dyndns/service/reconfigure"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
