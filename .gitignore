@@ -16,3 +16,4 @@ inventory/*.yaml
 inventory/*.yml
 roles/files/htpasswd
 *.patch
+vault/secrets.yaml

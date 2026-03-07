@@ -1,19 +1,22 @@
 ---
-# roles/opnsense-acme/tasks/main.yml
+# roles/opnsense-acme/tasks/main.yaml
 #
 # Configures os-acme-client on OPNsense:
 #   - Creates a Let's Encrypt production ACME account
 #   - Creates a Cloudflare DNS-01 validation method
 #   - Creates and issues a certificate for fw.{{ base_domain }}
 #
-# The issued certificate is stored in OPNsense's cert manager and
-# referenced by the opnsense-haproxy role for the :8444 frontend.
-#
 # Requires:
 #   opnsense_api_key, opnsense_api_secret  — vault
 #   cloudflare_api_token                   — vault
 #   acme_email                             — group_vars
 #   base_domain                            — group_vars
+#
+# Cloudflare field name note:
+#   The os-acme-client API uses dns_cf_token (NOT dns_cf_api_token).
+#   Confirmed from GET /api/acmeclient/validations/<uuid> response shape.
+#   dns_cf_email + dns_cf_key are the legacy Global API Key fields.
+#   dns_cf_token is the scoped API Token field — use this.
 #
 # Tags: opnsense, opnsense-acme
 
@@ -56,6 +59,12 @@
   tags: [opnsense, opnsense-acme]
 
 # ── Cloudflare DNS-01 validation ──────────────────────────────────
+# Field mapping (confirmed from GET response on existing validation):
+#   dns_cf_token      — Cloudflare scoped API Token  ← USE THIS
+#   dns_cf_email      — legacy Global API Key email  (leave blank)
+#   dns_cf_key        — legacy Global API Key        (leave blank)
+#   dns_cf_account_id — optional, not required for zone-scoped tokens
+#   dns_cf_zone_id    — optional, acme.sh auto-detects from token
 
 - name: Get existing ACME validation methods
   ansible.builtin.uri:
@@ -83,9 +92,10 @@
       validation:
         enabled: "1"
         name: "cloudflare-dns01"
+        description: "Cloudflare DNS-01 — managed by Ansible"
         method: "dns01"
         dns_service: "dns_cf"
-        dns_cf_api_token: "{{ cloudflare_api_token }}"
+        dns_cf_token: "{{ cloudflare_api_token }}"
     status_code: [200]
   delegate_to: localhost
   no_log: true
@@ -215,8 +225,7 @@
 
 # ── Issue certificate ─────────────────────────────────────────────
 # Only triggered when the cert entry was freshly created this run.
-# On re-runs, the cert entry already exists and this is skipped;
-# os-acme handles auto-renewal on its own schedule.
+# On re-runs the cert entry already exists; os-acme handles auto-renewal.
 
 - name: Issue fw.{{ base_domain }} certificate (Cloudflare DNS-01, ~90s)
   ansible.builtin.uri:

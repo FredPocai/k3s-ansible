@@ -1,5 +1,5 @@
 ---
-# roles/opnsense-haproxy/tasks/main.yml
+# roles/opnsense-haproxy/tasks/main.yaml
 #
 # Configures HAProxy on OPNsense via the os-haproxy plugin API.
 #
@@ -11,29 +11,17 @@
 # Requires:
 #   opnsense_api_key, opnsense_api_secret  — vault
 #   base_domain, k3s_nodes, k3s_services   — group_vars
-#   opnsense_lan_ip, opnsense_host         — group_vars
-#   acme_cert_uuid                         — set by opnsense-acme role, OR
-#                                            looked up from cert manager here
+#   opnsense_lan_ip                        — group_vars
+#   acme_cert_uuid                         — set by opnsense-acme, or looked
+#                                            up from cert manager below
 #
-# ── API shape note ────────────────────────────────────────────────
-# The OPNsense HAProxy settings/get endpoint returns a mixed type for
-# collection fields (servers, backends, acls, actions, frontends).
-# The inner key (e.g. haproxy.servers.server) is:
-#   []   — a JSON array  — when the collection is empty
-#   {}   — a JSON object — when one or more items exist (keyed by UUID)
-#
-# The standard Ansible `dict2items` filter fails on a list input.
-# We normalize with the pattern:
-#   (x if x is mapping else {}) | dict2items
-# applied via set_fact after each GET, producing clean dicts for all
-# downstream checks and UUID lookups.
+# The refresh+normalize step (settings/get + set_fact) is extracted to
+# tasks/refresh-normalize.yaml and called via include_tasks rather than
+# repeating 12 lines after every mutating API call.
 #
 # Tags: opnsense, opnsense-haproxy
 
-# ── Helper macro: normalize list-or-dict ─────────────────────────
-# After every settings/get we set five normalized facts:
-#   _hp_servers   _hp_backends   _hp_acls   _hp_actions   _hp_frontends
-# All are plain dicts {uuid: {name:..., ...}} or {} — never a list.
+# ── Wait for API ──────────────────────────────────────────────────
 
 - name: Wait for HAProxy API to become available
   ansible.builtin.uri:
@@ -51,31 +39,8 @@
   delegate_to: localhost
   tags: [opnsense, opnsense-haproxy]
 
-- name: Fetch initial HAProxy config
-  ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
-    method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
-    force_basic_auth: true
-    validate_certs: false
-    return_content: true
-  register: _hp_cfg
-  delegate_to: localhost
-  tags: [opnsense, opnsense-haproxy]
-
-- name: Normalize HAProxy collection facts (handle list-or-dict API shape)
-  ansible.builtin.set_fact:
-    _hp_servers: >-
-      {{ (_hp_cfg.json.haproxy.servers.server   if _hp_cfg.json.haproxy.servers.server   is mapping else {}) }}
-    _hp_backends: >-
-      {{ (_hp_cfg.json.haproxy.backends.backend if _hp_cfg.json.haproxy.backends.backend is mapping else {}) }}
-    _hp_acls: >-
-      {{ (_hp_cfg.json.haproxy.acls.acl         if _hp_cfg.json.haproxy.acls.acl         is mapping else {}) }}
-    _hp_actions: >-
-      {{ (_hp_cfg.json.haproxy.actions.action   if _hp_cfg.json.haproxy.actions.action   is mapping else {}) }}
-    _hp_frontends: >-
-      {{ (_hp_cfg.json.haproxy.frontends.frontend if _hp_cfg.json.haproxy.frontends.frontend is mapping else {}) }}
+- name: Initial fetch and normalize
+  ansible.builtin.include_tasks: refresh-normalize.yaml
   tags: [opnsense, opnsense-haproxy]
 
 # ═══════════════════════════════════════════════════════════════════
@@ -156,31 +121,8 @@
   when: "'fw-ssl-loopback' not in (_hp_servers | dict2items | map(attribute='value.name') | list)"
   tags: [opnsense, opnsense-haproxy]
 
-- name: Refresh HAProxy config and normalize (post-server creation)
-  ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
-    method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
-    force_basic_auth: true
-    validate_certs: false
-    return_content: true
-  register: _hp_cfg
-  delegate_to: localhost
-  tags: [opnsense, opnsense-haproxy]
-
-- name: Normalize HAProxy collection facts (post-server)
-  ansible.builtin.set_fact:
-    _hp_servers: >-
-      {{ (_hp_cfg.json.haproxy.servers.server if _hp_cfg.json.haproxy.servers.server is mapping else {}) }}
-    _hp_backends: >-
-      {{ (_hp_cfg.json.haproxy.backends.backend if _hp_cfg.json.haproxy.backends.backend is mapping else {}) }}
-    _hp_acls: >-
-      {{ (_hp_cfg.json.haproxy.acls.acl if _hp_cfg.json.haproxy.acls.acl is mapping else {}) }}
-    _hp_actions: >-
-      {{ (_hp_cfg.json.haproxy.actions.action if _hp_cfg.json.haproxy.actions.action is mapping else {}) }}
-    _hp_frontends: >-
-      {{ (_hp_cfg.json.haproxy.frontends.frontend if _hp_cfg.json.haproxy.frontends.frontend is mapping else {}) }}
+- name: Refresh after server creation
+  ansible.builtin.include_tasks: refresh-normalize.yaml
   tags: [opnsense, opnsense-haproxy]
 
 - name: Set server UUID facts
@@ -275,31 +217,8 @@
   when: "'fw-ssl-loopback' not in (_hp_backends | dict2items | map(attribute='value.name') | list)"
   tags: [opnsense, opnsense-haproxy]
 
-- name: Refresh HAProxy config and normalize (post-backend creation)
-  ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
-    method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
-    force_basic_auth: true
-    validate_certs: false
-    return_content: true
-  register: _hp_cfg
-  delegate_to: localhost
-  tags: [opnsense, opnsense-haproxy]
-
-- name: Normalize HAProxy collection facts (post-backend)
-  ansible.builtin.set_fact:
-    _hp_servers: >-
-      {{ (_hp_cfg.json.haproxy.servers.server if _hp_cfg.json.haproxy.servers.server is mapping else {}) }}
-    _hp_backends: >-
-      {{ (_hp_cfg.json.haproxy.backends.backend if _hp_cfg.json.haproxy.backends.backend is mapping else {}) }}
-    _hp_acls: >-
-      {{ (_hp_cfg.json.haproxy.acls.acl if _hp_cfg.json.haproxy.acls.acl is mapping else {}) }}
-    _hp_actions: >-
-      {{ (_hp_cfg.json.haproxy.actions.action if _hp_cfg.json.haproxy.actions.action is mapping else {}) }}
-    _hp_frontends: >-
-      {{ (_hp_cfg.json.haproxy.frontends.frontend if _hp_cfg.json.haproxy.frontends.frontend is mapping else {}) }}
+- name: Refresh after backend creation
+  ansible.builtin.include_tasks: refresh-normalize.yaml
   tags: [opnsense, opnsense-haproxy]
 
 - name: Set backend UUID facts
@@ -373,31 +292,8 @@
   when: "'sni_fw' not in (_hp_acls | dict2items | map(attribute='value.name') | list)"
   tags: [opnsense, opnsense-haproxy]
 
-- name: Refresh HAProxy config and normalize (post-ACL creation)
-  ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
-    method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
-    force_basic_auth: true
-    validate_certs: false
-    return_content: true
-  register: _hp_cfg
-  delegate_to: localhost
-  tags: [opnsense, opnsense-haproxy]
-
-- name: Normalize HAProxy collection facts (post-ACL)
-  ansible.builtin.set_fact:
-    _hp_servers: >-
-      {{ (_hp_cfg.json.haproxy.servers.server if _hp_cfg.json.haproxy.servers.server is mapping else {}) }}
-    _hp_backends: >-
-      {{ (_hp_cfg.json.haproxy.backends.backend if _hp_cfg.json.haproxy.backends.backend is mapping else {}) }}
-    _hp_acls: >-
-      {{ (_hp_cfg.json.haproxy.acls.acl if _hp_cfg.json.haproxy.acls.acl is mapping else {}) }}
-    _hp_actions: >-
-      {{ (_hp_cfg.json.haproxy.actions.action if _hp_cfg.json.haproxy.actions.action is mapping else {}) }}
-    _hp_frontends: >-
-      {{ (_hp_cfg.json.haproxy.frontends.frontend if _hp_cfg.json.haproxy.frontends.frontend is mapping else {}) }}
+- name: Refresh after ACL creation
+  ansible.builtin.include_tasks: refresh-normalize.yaml
   tags: [opnsense, opnsense-haproxy]
 
 # ═══════════════════════════════════════════════════════════════════
@@ -461,31 +357,8 @@
   when: "'route_fw' not in (_hp_actions | dict2items | map(attribute='value.name') | list)"
   tags: [opnsense, opnsense-haproxy]
 
-- name: Refresh HAProxy config and normalize (post-action creation)
-  ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
-    method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
-    force_basic_auth: true
-    validate_certs: false
-    return_content: true
-  register: _hp_cfg
-  delegate_to: localhost
-  tags: [opnsense, opnsense-haproxy]
-
-- name: Normalize HAProxy collection facts (post-action)
-  ansible.builtin.set_fact:
-    _hp_servers: >-
-      {{ (_hp_cfg.json.haproxy.servers.server if _hp_cfg.json.haproxy.servers.server is mapping else {}) }}
-    _hp_backends: >-
-      {{ (_hp_cfg.json.haproxy.backends.backend if _hp_cfg.json.haproxy.backends.backend is mapping else {}) }}
-    _hp_acls: >-
-      {{ (_hp_cfg.json.haproxy.acls.acl if _hp_cfg.json.haproxy.acls.acl is mapping else {}) }}
-    _hp_actions: >-
-      {{ (_hp_cfg.json.haproxy.actions.action if _hp_cfg.json.haproxy.actions.action is mapping else {}) }}
-    _hp_frontends: >-
-      {{ (_hp_cfg.json.haproxy.frontends.frontend if _hp_cfg.json.haproxy.frontends.frontend is mapping else {}) }}
+- name: Refresh after action creation
+  ansible.builtin.include_tasks: refresh-normalize.yaml
   tags: [opnsense, opnsense-haproxy]
 
 - name: Build comma-separated action UUID list for :443 frontend
@@ -532,7 +405,7 @@
 # fall back to a cert manager search.
 - name: Look up fw.{{ base_domain }} cert in OPNsense cert manager
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/core/certs/search"
+    url: "{{ opnsense_api_base }}/api/trust/cert/search"
     method: GET
     user: "{{ opnsense_api_key }}"
     password: "{{ opnsense_api_secret }}"
