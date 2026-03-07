@@ -10,4 +10,5 @@ opnsense_wan_interface: "wan"
 # Example:
 #   opnsense_ddns_hosts:
 #     - "myhome.example.com"
-opnsense_ddns_hosts: []
+opnsense_ddns_hosts: 
+  - "home.{{ base_domain }}"
