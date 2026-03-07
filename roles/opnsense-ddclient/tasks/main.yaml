@@ -7,28 +7,34 @@
 # Requires:
 #   opnsense_api_key, opnsense_api_secret  — vault
 #   cloudflare_api_token                   — vault
-#   cloudflare_zone_id                     — vault or group_vars (hex Zone ID)
-#   cloudflare_zone_name                   — group_vars (root domain, e.g. "homelab.internal")
+#   cloudflare_zone_id                     — vault (hex Zone ID)
+#   cloudflare_zone_name                   — group_vars (root domain, e.g. "pocai.net")
 #   opnsense_ddns_hosts                    — list of FQDNs, group_vars
 #   opnsense_wan_interface                 — group_vars (default: wan)
 #
-# API notes (os-ddclient plugin):
-#   List:   GET  /api/dyndns/accounts/searchAccount
-#   Create: POST /api/dyndns/accounts/addAccount
-#   Apply:  POST /api/dyndns/service/reconfigure
+# API notes (os-ddclient plugin, OPNsense 24.x/26.x):
+#   List:   GET  /api/ddclient/accounts/searchAccount
+#   Create: POST /api/ddclient/accounts/addAccount
+#   Apply:  POST /api/ddclient/service/reconfigure
+#
+#   NOTE: the /api/dyndns/ path is the OLD built-in service stub — it does NOT
+#   work without os-ddclient installed, and even then os-ddclient exposes its
+#   own /api/ddclient/ namespace. Always use /api/ddclient/.
 #
 #   For the Cloudflare service in os-ddclient:
-#     account.username  = zone root domain (e.g. "homelab.internal") — NOT the hex Zone ID
+#     account.username  = zone root domain (e.g. "pocai.net") — NOT the hex Zone ID
 #     account.password  = Cloudflare API Token
-#     account.hostnames = FQDN to update (e.g. "home.homelab.internal")
+#     account.hostnames = FQDN to update (e.g. "home.pocai.net")
 #
-# Pre-flight (Cloudflare API):
-#   ddclient's Cloudflare driver looks up the existing A record ID before
-#   patching it. If the record does not exist, it fails with:
-#     "No 'A' record at Cloudflare"
-#   We pre-create the record (content: 0.0.0.0) so ddclient finds it on
-#   first run and immediately overwrites the placeholder with the real WAN IP.
-#   This uses the Cloudflare REST API directly, not via OPNsense.
+# Pre-flight (Cloudflare API direct):
+#   ddclient's Cloudflare driver GETs the existing record by ID before PATCHing.
+#   If no A record exists it fails: "No 'A' record at Cloudflare".
+#   We pre-create placeholder records (0.0.0.0) via the CF REST API so ddclient
+#   finds them on first run and immediately overwrites with the real WAN IP.
+#
+#   IMPORTANT: CF record lookup uses query-string parameters, NOT a request body.
+#   Using body_format+body on a GET silently ignores the filter and may return
+#   all records, causing the existence check to give wrong results.
 #
 # Tags: opnsense, opnsense-ddclient
 
@@ -38,8 +44,8 @@
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/core/firmware/info"
     method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     return_content: true
@@ -57,8 +63,8 @@
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/core/firmware/install/os-ddclient"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body: ""
@@ -76,23 +82,17 @@
   tags: [opnsense, opnsense-ddclient]
 
 # -- Pre-flight: ensure Cloudflare A records exist -----------------
-# ddclient's Cloudflare driver GETs the existing record to obtain its ID,
-# then PATCHes it. If no A record exists the update fails with
-# "No 'A' record at Cloudflare".
-# We create placeholder records (0.0.0.0) that ddclient immediately overwrites.
-# Records are only created if they do not already exist.
+# Uses query-string parameters for filtering (CF API does not support
+# JSON body filtering on GET requests).
 
-- name: Check whether Cloudflare A record already exists for each hostname
+- name: Check whether Cloudflare A record exists for each hostname
   ansible.builtin.uri:
-    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records"
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records\
+?type=A&name={{ item | urlencode }}"
     method: GET
     headers:
       Authorization: "Bearer {{ cloudflare_api_token }}"
       Content-Type: "application/json"
-    body_format: json
-    body:
-      type: "A"
-      name: "{{ item }}"
     return_content: true
     status_code: [200]
   register: _cf_record_check
@@ -123,18 +123,17 @@
     label: "{{ item.item }}"
   delegate_to: localhost
   no_log: true
-  when: >-
-    item.json.result | default([]) | length == 0
+  when: item.json.result | default([]) | length == 0
   tags: [opnsense, opnsense-ddclient]
 
 # -- Configure os-ddclient accounts --------------------------------
 
 - name: Get existing ddclient accounts
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/dyndns/accounts/get" 
+    url: "{{ opnsense_api_base }}/api/dyndns/accounts/search_item"
     method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     return_content: true
@@ -146,8 +145,8 @@
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/dyndns/accounts/add_item"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -155,8 +154,8 @@
       account:
         enabled: "1"
         service: "Cloudflare"
-        # username = zone root domain (e.g. "homelab.internal") — NOT the hex Zone ID.
-        # ddclient Cloudflare driver uses this as the zone parameter.
+        # username = zone root domain (e.g. "pocai.net") — NOT the hex Zone ID.
+        # The ddclient Cloudflare driver maps this to its 'zone' parameter.
         username: "{{ cloudflare_zone_name }}"
         password: "{{ cloudflare_api_token }}"
         hostnames: "{{ item }}"
@@ -178,8 +177,8 @@
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/dyndns/service/reconfigure"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -195,9 +194,7 @@
       - "  Service:   Cloudflare"
       - "  Zone:      {{ cloudflare_zone_name }}"
       - "  Interface: {{ opnsense_wan_interface | default('wan') }}"
-      - "  Hostnames:"
-      - "{% for h in opnsense_ddns_hosts %}    - {{ h }}{% endfor %}"
-      - ""
+      - "  Hostnames: {{ opnsense_ddns_hosts | join(', ') }}"
       - "  A records pre-created in Cloudflare (placeholder 0.0.0.0)."
-      - "  ddclient will update them with the real WAN IP within 5 minutes."
+      - "  ddclient will update with real WAN IP within ~5 minutes."
   tags: [opnsense, opnsense-ddclient]

@@ -9,8 +9,8 @@
 # Requires:
 #   opnsense_api_key, opnsense_api_secret  — vault
 #   cloudflare_api_token                   — vault  (Restricted API Token)
-#   cloudflare_account_id                  — vault or group_vars
-#   cloudflare_zone_id                     — vault or group_vars (optional)
+#   cloudflare_account_id                  — vault
+#   cloudflare_zone_id                     — vault (optional, acme.sh auto-detects)
 #   acme_email                             — group_vars
 #   base_domain                            — group_vars
 #
@@ -18,24 +18,21 @@
 #   dns_cf_email      — Legacy Global API Key e-mail  (leave blank)
 #   dns_cf_key        — Legacy Global API Key          (leave blank)
 #   dns_cf_token      — Restricted API Token           <- USE THIS
-#   dns_cf_account_id — CF Account ID                  <- required with token
-#   dns_cf_zone_id    — CF Zone ID                     <- optional; acme.sh auto-detects
+#   dns_cf_account_id — CF Account ID                  <- required with restricted token
+#   dns_cf_zone_id    — CF Zone ID                     <- optional
 #
-# NOTE: if the validation entry exists but has an empty dns_cf_token (because
-# it was created by a previous run that used the wrong field name), delete it
-# in the GUI (Services -> ACME Client -> Validation Methods) so this role can
-# recreate it correctly.
+# If the validation entry exists but has an empty dns_cf_token (created by
+# a previous run using the wrong field name), delete it in the GUI at
+# Services -> ACME Client -> Validation Methods before re-running.
 #
 # Tags: opnsense, opnsense-acme
-
-# -- ACME Account --------------------------------------------------
 
 - name: Get existing ACME accounts
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/acmeclient/accounts/search"
     method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     return_content: true
@@ -47,8 +44,8 @@
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/acmeclient/accounts/add/"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -66,14 +63,12 @@
     | list | length == 0
   tags: [opnsense, opnsense-acme]
 
-# -- Cloudflare DNS-01 validation ----------------------------------
-
 - name: Get existing ACME validation methods
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/acmeclient/validations/search"
     method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     return_content: true
@@ -85,8 +80,8 @@
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/acmeclient/validations/add/"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -109,21 +104,17 @@
     | list | length == 0
   tags: [opnsense, opnsense-acme]
 
-# -- Resolve UUIDs -------------------------------------------------
-
 - name: Fetch fresh ACME accounts and validations (with UUIDs)
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/acmeclient/{{ item }}/search"
     method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     return_content: true
   register: _acme_lookup
-  loop:
-    - accounts
-    - validations
+  loop: [accounts, validations]
   delegate_to: localhost
   tags: [opnsense, opnsense-acme]
 
@@ -143,14 +134,12 @@
       }}
   tags: [opnsense, opnsense-acme]
 
-# -- Certificate ---------------------------------------------------
-
 - name: Get existing ACME certificates
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/acmeclient/certificates/search"
     method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     return_content: true
@@ -162,8 +151,8 @@
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/acmeclient/certificates/add/"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -197,8 +186,8 @@
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/acmeclient/certificates/search"
     method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     return_content: true
@@ -227,16 +216,12 @@
       }}
   tags: [opnsense, opnsense-acme]
 
-# -- Issue certificate ---------------------------------------------
-# Only triggered when the cert entry was freshly created this run.
-# On re-runs the cert entry already exists; os-acme handles auto-renewal.
-
 - name: Issue fw.{{ base_domain }} certificate (Cloudflare DNS-01, ~90s)
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/acmeclient/certificates/sign/{{ acme_cert_uuid }}"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json

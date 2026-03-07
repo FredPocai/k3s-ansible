@@ -1,0 +1,436 @@
+---
+# roles/opnsense-register-service/tasks/main.yaml
+#
+# Registers a single service into the OPNsense stack:
+#   1. Unbound host override   (always)
+#   2. HAProxy SNI ACL         (always)
+#   3. HAProxy use-backend action (always)
+#   4. HAProxy reconfigure     (always)
+#   5. ACME certificate entry  (when service.acme_cert | default(true))
+#   6. Cloudflare A record     (when service.public | default(false))
+#   7. NAT portforward         (when service.public | default(false))
+#   8. Firewall allow rule     (when service.public | default(false))
+#
+# Expects variable: service (dict) — see defaults/main.yaml for schema.
+# All tasks delegate_to: localhost.
+# Tags: opnsense, register-service
+
+- name: Validate required service fields
+  ansible.builtin.assert:
+    that:
+      - service.name is defined
+      - service.hostname is defined
+    fail_msg: "service.name and service.hostname are both required."
+  tags: [opnsense, register-service]
+
+- name: Set service fact defaults
+  ansible.builtin.set_fact:
+    _svc_name: "{{ service.name }}"
+    _svc_host: "{{ service.hostname }}"
+    _svc_public: "{{ service.public | default(false) | bool }}"
+    _svc_backend_ip: "{{ service.backend_ip | default(opnsense_lan_ip) }}"
+    _svc_backend_port: "{{ service.backend_port | default(443) }}"
+    _svc_acme_cert: "{{ service.acme_cert | default(true) | bool }}"
+  tags: [opnsense, register-service]
+
+# =================================================================
+# 1. UNBOUND
+# =================================================================
+
+- name: Get existing Unbound host overrides
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/unbound/host_overrides/searchHostOverride"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: _unbound_existing
+  delegate_to: localhost
+  tags: [opnsense, register-service]
+
+- name: Register {{ _svc_host }} in Unbound
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/unbound/host_overrides/addHostOverride"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      host:
+        enabled: "1"
+        hostname: "{{ _svc_host.split('.')[0] }}"
+        domain: "{{ _svc_host.split('.')[1:] | join('.') }}"
+        server: "{{ opnsense_lan_ip }}"
+        description: "{{ _svc_host }} — managed by Ansible"
+    status_code: [200, 201]
+  delegate_to: localhost
+  when: >-
+    _unbound_existing.json.rows
+    | selectattr('hostname', 'equalto', _svc_host.split('.')[0])
+    | selectattr('domain',   'equalto', _svc_host.split('.')[1:] | join('.'))
+    | list | length == 0
+  tags: [opnsense, register-service]
+
+- name: Apply Unbound configuration
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/unbound/service/reconfigure"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+  delegate_to: localhost
+  tags: [opnsense, register-service]
+
+# =================================================================
+# 2-4. HAPROXY  (SNI ACL + use-backend action + reconfigure)
+# =================================================================
+
+- name: Fetch and normalize HAProxy config
+  ansible.builtin.include_tasks: "{{ role_path }}/../opnsense-haproxy/tasks/refresh-normalize.yaml"
+  tags: [opnsense, register-service]
+
+- name: Create SNI ACL for {{ _svc_host }}
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addAcl"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      acl:
+        enabled: "1"
+        name: "sni_{{ _svc_name }}"
+        expression: "ssl_sni"
+        value: "{{ _svc_host }}"
+        description: "SNI: {{ _svc_host }} — managed by Ansible"
+    status_code: [200]
+  delegate_to: localhost
+  when: >-
+    'sni_' + _svc_name not in
+    (_hp_acls | dict2items | map(attribute='value.name') | list)
+  tags: [opnsense, register-service]
+
+- name: Refresh HAProxy config after ACL creation
+  ansible.builtin.include_tasks: "{{ role_path }}/../opnsense-haproxy/tasks/refresh-normalize.yaml"
+  tags: [opnsense, register-service]
+
+- name: Look up k3s-ingress backend UUID
+  ansible.builtin.set_fact:
+    _svc_backend_uuid: >-
+      {{
+        _hp_backends | dict2items
+        | selectattr('value.name', 'equalto', 'k3s-ingress')
+        | map(attribute='key') | first
+      }}
+  tags: [opnsense, register-service]
+
+- name: Create use-backend action for {{ _svc_host }}
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addAction"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      action:
+        enabled: "1"
+        name: "route_{{ _svc_name }}"
+        operator: "use_backend"
+        backend: "{{ _svc_backend_uuid }}"
+        acl: >-
+          {{
+            _hp_acls | dict2items
+            | selectattr('value.name', 'equalto', 'sni_' + _svc_name)
+            | map(attribute='key') | first
+          }}
+        description: "Route {{ _svc_host }} -> k3s — managed by Ansible"
+    status_code: [200]
+  delegate_to: localhost
+  when: >-
+    'route_' + _svc_name not in
+    (_hp_actions | dict2items | map(attribute='value.name') | list)
+  tags: [opnsense, register-service]
+
+- name: Refresh HAProxy config and update :443 frontend action list
+  ansible.builtin.include_tasks: "{{ role_path }}/../opnsense-haproxy/tasks/refresh-normalize.yaml"
+  tags: [opnsense, register-service]
+
+- name: Look up current :443 frontend UUID and existing action list
+  ansible.builtin.set_fact:
+    _k3s_https_uuid: >-
+      {{
+        _hp_frontends | dict2items
+        | selectattr('value.name', 'equalto', 'k3s-https')
+        | map(attribute='key') | first
+      }}
+    _all_route_action_uuids: >-
+      {{
+        _hp_actions | dict2items
+        | selectattr('value.name', 'match', '^route_')
+        | map(attribute='key') | list | join(',')
+      }}
+  tags: [opnsense, register-service]
+
+- name: Update :443 frontend linkedActions to include new route
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/setFrontend/{{ _k3s_https_uuid }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      frontend:
+        linkedActions: "{{ _all_route_action_uuids }}"
+    status_code: [200]
+  delegate_to: localhost
+  tags: [opnsense, register-service]
+
+- name: Apply HAProxy configuration
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/service/reconfigure"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+  delegate_to: localhost
+  tags: [opnsense, register-service]
+
+# =================================================================
+# 5. ACME CERTIFICATE (optional, default true)
+# =================================================================
+
+- name: ACME — get existing certificates
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/certificates/search"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: _acme_certs
+  delegate_to: localhost
+  when: _svc_acme_cert
+  tags: [opnsense, register-service]
+
+- name: ACME — resolve account and validation UUIDs
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/{{ item }}/search"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: _acme_lookup
+  loop: [accounts, validations]
+  delegate_to: localhost
+  when: _svc_acme_cert
+  tags: [opnsense, register-service]
+
+- name: ACME — set account/validation UUID facts
+  ansible.builtin.set_fact:
+    _svc_acme_account_uuid: >-
+      {{
+        _acme_lookup.results[0].json.rows
+        | selectattr('name', 'equalto', 'letsencrypt-production')
+        | map(attribute='uuid') | first
+      }}
+    _svc_acme_validation_uuid: >-
+      {{
+        _acme_lookup.results[1].json.rows
+        | selectattr('name', 'equalto', 'cloudflare-dns01')
+        | map(attribute='uuid') | first
+      }}
+  when: _svc_acme_cert
+  tags: [opnsense, register-service]
+
+- name: ACME — create certificate entry for {{ _svc_host }}
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/certificates/add/"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      certificate:
+        enabled: "1"
+        name: "{{ _svc_host }}"
+        description: "{{ _svc_host }} — managed by Ansible"
+        altNames: "{{ _svc_host }}"
+        account: "{{ _svc_acme_account_uuid }}"
+        validationMethod: "{{ _svc_acme_validation_uuid }}"
+        keyLength: "key_ec384"
+        autoRenewal: "1"
+        renewInterval: "60"
+        ocsp: "0"
+        profile: ""
+        restartActions: ""
+        aliasmode: "none"
+        domainalias: ""
+        challengealias: ""
+    status_code: [200]
+  delegate_to: localhost
+  when: >-
+    _svc_acme_cert and
+    (_acme_certs.json.rows
+    | selectattr('name', 'equalto', _svc_host)
+    | list | length == 0)
+  register: _svc_acme_cert_created
+  tags: [opnsense, register-service]
+
+- name: ACME — issue certificate for {{ _svc_host }} (~90s)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/certificates/sign/\
+{{ (_acme_certs.json.rows | selectattr('name', 'equalto', _svc_host) | map(attribute='uuid') | list | first) if not _svc_acme_cert_created.changed | default(false) else _svc_acme_cert_created.json.uuid | default('') }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+    timeout: 120
+  delegate_to: localhost
+  when: _svc_acme_cert and (_svc_acme_cert_created.changed | default(false))
+  tags: [opnsense, register-service]
+
+# =================================================================
+# 6-8. PUBLIC SERVICE: CF record + NAT portforward + FW rule
+# =================================================================
+
+- name: PUBLIC — check Cloudflare A record for {{ _svc_host }}
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records\
+?type=A&name={{ _svc_host | urlencode }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+      Content-Type: "application/json"
+    return_content: true
+    status_code: [200]
+  register: _svc_cf_check
+  delegate_to: localhost
+  no_log: true
+  when: _svc_public
+  tags: [opnsense, register-service]
+
+- name: PUBLIC — create Cloudflare A record for {{ _svc_host }} (placeholder 0.0.0.0)
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      type: "A"
+      name: "{{ _svc_host }}"
+      content: "0.0.0.0"
+      ttl: 120
+      proxied: false
+      comment: "{{ _svc_host }} public — managed by Ansible, updated by ddclient"
+    return_content: true
+    status_code: [200]
+  delegate_to: localhost
+  no_log: true
+  when: _svc_public and (_svc_cf_check.json.result | default([]) | length == 0)
+  tags: [opnsense, register-service]
+
+- name: PUBLIC — get existing NAT portforward rules
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/firewall/nat/searchRule"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: _nat_rules
+  delegate_to: localhost
+  when: _svc_public
+  tags: [opnsense, register-service]
+
+- name: PUBLIC — create NAT portforward WAN:443 -> HAProxy LAN:443 for {{ _svc_name }}
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/firewall/nat/addRule"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      rule:
+        enabled: "1"
+        interface: "{{ opnsense_wan_interface | default('wan') }}"
+        protocol: "tcp"
+        src: "any"
+        srcport: "any"
+        dst: "any"
+        dstport: "{{ opnsense_public_port | default(443) }}"
+        target: "{{ opnsense_lan_ip }}"
+        localport: "{{ opnsense_public_port | default(443) }}"
+        description: "DNAT WAN:443 -> HAProxy {{ _svc_name }} — managed by Ansible"
+        log: "0"
+        # nosync prevents automatic associated filter rule; we add it explicitly below
+        associated-rule-id: "add-associated-rule"
+    status_code: [200]
+  delegate_to: localhost
+  register: _nat_rule_result
+  when: >-
+    _svc_public and
+    (_nat_rules.json.rows | default([])
+    | selectattr('description', 'search', 'DNAT WAN:443 -> HAProxy')
+    | list | length == 0)
+  tags: [opnsense, register-service]
+
+- name: PUBLIC — apply NAT and firewall rules
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/firewall/nat/reconfigure"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+  delegate_to: localhost
+  when: _svc_public and (_nat_rule_result.changed | default(false))
+  tags: [opnsense, register-service]
+
+# =================================================================
+# Summary
+# =================================================================
+
+- name: Print registration summary
+  ansible.builtin.debug:
+    msg:
+      - "Service registered: {{ _svc_host }}"
+      - "  Unbound:  {{ _svc_host }} -> {{ opnsense_lan_ip }}"
+      - "  HAProxy:  SNI sni_{{ _svc_name }} -> route_{{ _svc_name }} -> k3s-ingress"
+      - "  ACME:     {{ 'cert entry created/exists' if _svc_acme_cert else 'skipped' }}"
+      - "  Public:   {{ 'CF A record + NAT WAN:443 -> ' + opnsense_lan_ip + ':443' if _svc_public else 'internal only' }}"
+  tags: [opnsense, register-service]

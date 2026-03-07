@@ -1,14 +1,17 @@
 ---
 # roles/opnsense-ddclient/defaults/main.yaml
 
-# WAN interface name as shown in OPNsense GUI -> Interfaces -> Assignments.
-# Common values: wan, igb0, em0, vtnet0
+# WAN interface as shown in OPNsense GUI -> Interfaces -> Assignments.
 opnsense_wan_interface: "wan"
 
 # List of public FQDNs to keep updated with the current WAN IP.
-# Must be non-empty to configure anything.
 # Example:
 #   opnsense_ddns_hosts:
-#     - "myhome.example.com"
-opnsense_ddns_hosts: 
-  - "home.{{ base_domain }}"
+#     - "home.pocai.net"
+opnsense_ddns_hosts: []
+
+# cloudflare_zone_name: root domain managed in Cloudflare (e.g. "pocai.net").
+# This is the human-readable name used as ddclient's 'zone' parameter —
+# NOT the hex Zone ID (that goes in vault as cloudflare_zone_id).
+# Set in group_vars/all.yaml:
+#   cloudflare_zone_name: "pocai.net"

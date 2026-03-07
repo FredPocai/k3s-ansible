@@ -27,7 +27,7 @@
 #
 # Plugin detection fix:
 #   /api/core/firmware/info does NOT list installed plugins.
-#   Use /api/core/firmware/packages which returns {"rows": [...]} with name/version.
+#   Use /api/core/firmware/info which returns {"rows": [...]} with name/version.
 #
 # Plugin install fix (OPNsense 24.x+):
 #   POST /api/core/firmware/install  body: {"packages": ["os-haproxy"]}

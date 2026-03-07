@@ -2,7 +2,7 @@
 # roles/opnsense-haproxy/tasks/refresh-normalize.yaml
 #
 # Fetches the current HAProxy settings/get response and normalizes all five
-# collection sub-keys into clean facts that are safe to use with dict2items.
+# collection sub-keys into clean facts safe to use with dict2items.
 #
 # The OPNsense HAProxy API returns collection sub-keys as:
 #   []  — JSON array  when the collection is empty
@@ -12,29 +12,26 @@
 # empty-list case so that dict2items never receives a list.
 #
 # Facts set:
-#   _hp_cfg       — raw API response (registered URI result)
+#   _hp_cfg       — raw API response
 #   _hp_servers   — haproxy.servers.server   normalized to dict
 #   _hp_backends  — haproxy.backends.backend normalized to dict
 #   _hp_acls      — haproxy.acls.acl         normalized to dict
 #   _hp_actions   — haproxy.actions.action   normalized to dict
 #   _hp_frontends — haproxy.frontends.frontend normalized to dict
-#
-# Called via: include_tasks: refresh-normalize.yaml
-# Tags are inherited from the including task's tags block.
 
 - name: Fetch HAProxy config (settings/get)
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
     method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     return_content: true
   register: _hp_cfg
   delegate_to: localhost
 
-- name: Normalize HAProxy collections (list-or-dict → dict)
+- name: Normalize HAProxy collections (list-or-dict -> dict)
   ansible.builtin.set_fact:
     _hp_servers: >-
       {{ (_hp_cfg.json.haproxy.servers.server       if _hp_cfg.json.haproxy.servers.server       is mapping else {}) }}

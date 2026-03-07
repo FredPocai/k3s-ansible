@@ -1,0 +1,77 @@
+---
+# group_vars/all.yaml.sample
+#
+# Copy to group_vars/all.yaml and fill in your real values.
+# group_vars/all.yaml is gitignored — never commit real IPs/domains.
+
+# ── Connection ────────────────────────────────────────────────────
+ansible_user: username
+ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+ansible_python_interpreter: /usr/bin/python3
+
+# ── Network interfaces ────────────────────────────────────────────
+# Ubuntu 24.04 (Proxmox VMs via VirtIO): typically enp6s18 / enp6s19
+# Oracle Linux 9 (VMware/KVM):           typically ens18 / ens19
+# Adjust per environment in host_vars or a separate group_vars file.
+k3s_iface: enp6s18          # Internal network NIC — cluster traffic
+storage_iface: enp6s19      # Storage network NIC — Longhorn + NFS/iSCSI
+k3s_gateway: 192.168.x.254  # OPNsense LAN IP — default gateway
+
+# ── Domain ────────────────────────────────────────────────────────
+base_domain: homelab.internal   # Services exposed as <name>.{{ base_domain }}
+
+# ── OPNsense ──────────────────────────────────────────────────────
+opnsense_host: "192.168.x.254"
+opnsense_lan_ip: "192.168.x.254"
+
+# Start with HTTP on :8080. After fw.{{ base_domain }} is confirmed working,
+# update to: https://192.168.x.254 (or https://fw.{{ base_domain }})
+opnsense_api_base: "http://192.168.x.254:8080"
+
+# ── ACME / cert-manager ───────────────────────────────────────────
+acme_email: "acme-certs@homelab.internal"
+certmanager_version: ""   # empty = latest stable; pin e.g. "v1.15.0"
+
+# ── Cloudflare ────────────────────────────────────────────────────
+# cloudflare_api_token  -> vault/secrets.yaml  (Restricted API Token)
+# cloudflare_account_id -> vault/secrets.yaml  (CF Account ID — required for ACME DNS-01)
+# cloudflare_zone_id    -> vault/secrets.yaml  (hex Zone ID  — used for CF REST API calls)
+
+# Root domain managed in Cloudflare. Used by:
+#   - opnsense-ddclient: ddclient 'zone' parameter (must be domain name, NOT hex Zone ID)
+#   - opnsense-acme:     dns_cf_zone_id is optional; account_id + token are required
+cloudflare_zone_name: "example.com"
+
+# ── k3s nodes ─────────────────────────────────────────────────────
+k3s_nodes:
+  - { name: k3s211, ip: "192.168.x.211", storage_ip: "192.168.1xx.211" }
+  - { name: k3s212, ip: "192.168.x.212", storage_ip: "192.168.1xx.212" }
+  - { name: k3s213, ip: "192.168.x.213", storage_ip: "192.168.1xx.213" }
+
+k3s_init_ip: "192.168.x.211"
+
+# ── Internal services — Unbound + HAProxy SNI + k3s Ingress ───────
+# Each entry:
+#   - registers an Unbound host override -> opnsense_lan_ip
+#   - creates a HAProxy SNI ACL + use-backend action -> k3s-ingress
+#   - expects a corresponding k3s Ingress with a letsencrypt cert
+#
+# To add a new service: append one line and re-run --tags opnsense-haproxy
+# (or use --tags register-service for a single on-demand registration)
+k3s_services:
+  - { name: headlamp, hostname: "headlamp.homelab.internal" }
+  - { name: longhorn,  hostname: "longhorn.homelab.internal" }
+
+# ── Dynamic DNS ───────────────────────────────────────────────────
+# opnsense-ddclient role: installs os-ddclient, pre-creates CF A records,
+# configures Cloudflare DynDNS for the listed FQDNs.
+# Set to [] or omit to skip the ddclient phase entirely.
+opnsense_ddns_hosts:
+  - "home.example.com"
+
+# WAN interface name as shown in OPNsense GUI -> Interfaces -> Assignments.
+opnsense_wan_interface: "wan"
+
+# ── Misc ──────────────────────────────────────────────────────────
+# Set false to keep os-caddy stub (e.g. if you intentionally use it)
+opnsense_remove_stale_plugins: true
