@@ -1,13 +1,23 @@
 ---
 # roles/prereqs/tasks/main.yml
-# System preparation: packages, kernel params, disk setup, storage interface
+# System preparation: hostname, /etc/hosts, packages, kernel params, disk, network.
+#
+# Distro-specific tasks are split into separate files and included based on
+# ansible_os_family:
+#
+#   packages-apt.yml       — apt packages          (Debian / Ubuntu 24.04)
+#   packages-dnf.yml       — dnf packages          (Oracle Linux 9, RHEL 9)
+#   security-apparmor.yml  — AppArmor config       (Debian / Ubuntu)
+#   security-selinux.yml   — SELinux config        (RedHat / Oracle Linux)
+#   network-netplan.yml    — netplan static IPs    (Debian / Ubuntu)
+#   network-nmcli.yml      — NetworkManager/nmcli  (RedHat / Oracle Linux)
 
 - name: Set hostname to inventory name
-  hostname:
+  ansible.builtin.hostname:
     name: "{{ inventory_hostname }}"
 
 - name: Update /etc/hosts with cluster nodes
-  blockinfile:
+  ansible.builtin.blockinfile:
     path: /etc/hosts
     marker: "# {mark} k3s cluster nodes"
     block: |
@@ -15,27 +25,18 @@
       {{ s.ip }} {{ s.name }} {{ s.name }}.{{ base_domain }}
       {% endfor %}
 
-- name: Install required packages
-  apt:
-    name:
-      - open-iscsi      # required by Longhorn
-      - nfs-common      # NFS client for TrueNAS mounts
-      - cryptsetup      # required by Longhorn
-      - curl
-      - jq
-      - util-linux
-      - e2fsprogs
-    state: present
-    update_cache: true
+# ── Distro-specific: packages ─────────────────────────────────────
+- name: Include apt package tasks (Debian/Ubuntu)
+  ansible.builtin.include_tasks: packages-apt.yml
+  when: ansible_os_family == 'Debian'
 
-- name: Enable and start iscsid (required by Longhorn)
-  systemd:
-    name: iscsid
-    enabled: true
-    state: started
+- name: Include dnf package tasks (RedHat/Oracle Linux)
+  ansible.builtin.include_tasks: packages-dnf.yml
+  when: ansible_os_family == 'RedHat'
 
+# ── Kernel modules ────────────────────────────────────────────────
 - name: Load required kernel modules
-  modprobe:
+  community.general.modprobe:
     name: "{{ item }}"
     state: present
   loop:
@@ -44,15 +45,17 @@
     - br_netfilter
 
 - name: Persist kernel modules across reboots
-  copy:
+  ansible.builtin.copy:
     dest: /etc/modules-load.d/k3s.conf
     content: |
       iscsi_tcp
       overlay
       br_netfilter
+    mode: "0644"
 
+# ── Sysctl ────────────────────────────────────────────────────────
 - name: Set required sysctl parameters
-  sysctl:
+  ansible.posix.sysctl:
     name: "{{ item.name }}"
     value: "{{ item.value }}"
     sysctl_set: true
@@ -65,88 +68,51 @@
     - { name: "net.ipv4.conf.all.rp_filter",         value: "0" }  # required by Calico
     - { name: "net.ipv4.conf.default.rp_filter",     value: "0" }  # required by Calico
 
-# ── Network interfaces — static IPv4 ─────────────────────────────
-# Both interfaces are configured statically. DHCP is disabled on both
-# to prevent DHCP-advertised DNS servers from leaking into systemd-resolved
-# and subsequently into pod DNS config via CoreDNS.
-#
-# IPv6 is left as-is (SLAAC via RA) on enp6s18 — no changes to IPv6.
-# enp6s19 (storage) is IPv4-only; no IPv6 needed on storage network.
-#
-# We write a single netplan file covering both interfaces and remove the
-# old 70-dnssuffix.yaml if it exists.
+# ── Distro-specific: security module ──────────────────────────────
+- name: Include AppArmor tasks (Debian/Ubuntu)
+  ansible.builtin.include_tasks: security-apparmor.yml
+  when: ansible_os_family == 'Debian'
 
-- name: Remove legacy 70-dnssuffix.yaml if present
-  ansible.builtin.file:
-    path: /etc/netplan/70-dnssuffix.yaml
-    state: absent
-  notify: Apply netplan
+- name: Include SELinux tasks (RedHat/Oracle Linux)
+  ansible.builtin.include_tasks: security-selinux.yml
+  when: ansible_os_family == 'RedHat'
 
-- name: Remove legacy 60-storage.yaml if present
-  ansible.builtin.file:
-    path: /etc/netplan/60-storage.yaml
-    state: absent
-  notify: Apply netplan
+# ── Distro-specific: network configuration ────────────────────────
+- name: Include netplan network tasks (Debian/Ubuntu)
+  ansible.builtin.include_tasks: network-netplan.yml
+  when: ansible_os_family == 'Debian'
 
-- name: Configure static IPv4 on both interfaces via netplan
-  ansible.builtin.copy:
-    dest: /etc/netplan/60-k3s-static.yaml
-    mode: "0600"
-    content: |
-      network:
-        version: 2
-        ethernets:
-          {{ k3s_iface }}:
-            dhcp4: false
-            dhcp6: false
-            accept-ra: true
-            addresses:
-              - {{ k3s_static_ip }}/24
-            routes:
-              - to: default
-                via: {{ k3s_gateway }}
-            nameservers:
-              addresses:
-                - {{ opnsense_host }}
-              search: []
-          {{ storage_iface }}:
-            dhcp4: false
-            dhcp6: false
-            accept-ra: false
-            addresses:
-              - {{ k3s_storage_ip }}/24
-            nameservers:
-              addresses:
-                - {{ opnsense_host }}
-              search: []
-  notify: Apply netplan
+- name: Include NetworkManager/nmcli network tasks (RedHat/Oracle Linux)
+  ansible.builtin.include_tasks: network-nmcli.yml
+  when: ansible_os_family == 'RedHat'
 
-- name: Flush handlers (apply netplan immediately)
-  meta: flush_handlers
+# ── Longhorn aux disk ─────────────────────────────────────────────
+# Prepares the secondary block device (longhorn_aux_device, e.g. /dev/sdb)
+# as an ext4 filesystem mounted at longhorn_data_path.
+# blkid check prevents re-formatting on re-runs.
 
-# ── Longhorn aux disk (/dev/sdb) ──────────────────────────────────
-- name: Check if /dev/sdb already has a filesystem
-  command: blkid -s TYPE -o value /dev/sdb
-  register: sdb_fs
+- name: Check if {{ longhorn_aux_device }} already has a filesystem
+  ansible.builtin.command: blkid -s TYPE -o value {{ longhorn_aux_device }}
+  register: _sdb_fs
   changed_when: false
   failed_when: false
 
-- name: Create ext4 filesystem on /dev/sdb (if blank)
-  filesystem:
+- name: Create ext4 filesystem on {{ longhorn_aux_device }} (if blank)
+  community.general.filesystem:
     fstype: ext4
     dev: "{{ longhorn_aux_device }}"
-  when: sdb_fs.stdout == ""
+  when: _sdb_fs.stdout == ""
 
 - name: Create Longhorn data directory
-  file:
+  ansible.builtin.file:
     path: "{{ longhorn_data_path }}"
     state: directory
     mode: "0755"
 
-- name: Mount /dev/sdb at Longhorn data path
-  mount:
+- name: Mount {{ longhorn_aux_device }} at {{ longhorn_data_path }}
+  ansible.posix.mount:
     path: "{{ longhorn_data_path }}"
     src: "{{ longhorn_aux_device }}"
     fstype: ext4
     opts: defaults,noatime
-    state: mounted   # also adds to /etc/fstab
+    state: mounted

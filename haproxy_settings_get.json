@@ -1,0 +1,1434 @@
+{
+  "haproxy": {
+    "general": {
+      "enabled": "0",
+      "gracefulStop": "0",
+      "hardStopAfter": "60s",
+      "closeSpreadTime": "",
+      "seamlessReload": "0",
+      "storeOcsp": "0",
+      "showIntro": "1",
+      "peers": {
+        "enabled": "0",
+        "name1": "",
+        "listen1": "",
+        "port1": "1024",
+        "name2": "",
+        "listen2": "",
+        "port2": "1024"
+      },
+      "tuning": {
+        "root": "0",
+        "maxConnections": "",
+        "nbthread": "1",
+        "resolversPrefer": {
+          "": {
+            "value": "None",
+            "selected": 0
+          },
+          "ipv4": {
+            "value": "IPv4",
+            "selected": 1
+          },
+          "ipv6": {
+            "value": "IPv6",
+            "selected": 0
+          }
+        },
+        "sslServerVerify": {
+          "ignore": {
+            "value": "no preference [default]",
+            "selected": 1
+          },
+          "required": {
+            "value": "enforce verify",
+            "selected": 0
+          },
+          "none": {
+            "value": "disable verify",
+            "selected": 0
+          }
+        },
+        "maxDHSize": "2048",
+        "bufferSize": "16384",
+        "spreadChecks": "2",
+        "bogusProxyEnabled": "0",
+        "luaMaxMem": "0",
+        "customOptions": "",
+        "ocspUpdateEnabled": "0",
+        "ocspUpdateMinDelay": "300",
+        "ocspUpdateMaxDelay": "3600",
+        "ssl_defaultsEnabled": "0",
+        "ssl_bindOptions": {
+          "no-sslv3": {
+            "value": "no-sslv3",
+            "selected": 0
+          },
+          "no-tlsv10": {
+            "value": "no-tlsv10",
+            "selected": 0
+          },
+          "no-tlsv11": {
+            "value": "no-tlsv11",
+            "selected": 0
+          },
+          "no-tlsv12": {
+            "value": "no-tlsv12",
+            "selected": 0
+          },
+          "no-tlsv13": {
+            "value": "no-tlsv13",
+            "selected": 0
+          },
+          "no-tls-tickets": {
+            "value": "no-tls-tickets",
+            "selected": 0
+          },
+          "force-sslv3": {
+            "value": "force-sslv3",
+            "selected": 0
+          },
+          "force-tlsv10": {
+            "value": "force-tlsv10",
+            "selected": 0
+          },
+          "force-tlsv11": {
+            "value": "force-tlsv11",
+            "selected": 0
+          },
+          "force-tlsv12": {
+            "value": "force-tlsv12",
+            "selected": 0
+          },
+          "force-tlsv13": {
+            "value": "force-tlsv13",
+            "selected": 0
+          },
+          "prefer-client-ciphers": {
+            "value": "prefer-client-ciphers",
+            "selected": 1
+          },
+          "strict-sni": {
+            "value": "strict-sni",
+            "selected": 0
+          }
+        },
+        "ssl_minVersion": {
+          "": {
+            "value": "None",
+            "selected": 0
+          },
+          "SSLv3": {
+            "value": "SSLv3",
+            "selected": 0
+          },
+          "TLSv1.0": {
+            "value": "TLSv1.0",
+            "selected": 0
+          },
+          "TLSv1.1": {
+            "value": "TLSv1.1",
+            "selected": 0
+          },
+          "TLSv1.2": {
+            "value": "TLSv1.2",
+            "selected": 1
+          },
+          "TLSv1.3": {
+            "value": "TLSv1.3",
+            "selected": 0
+          }
+        },
+        "ssl_maxVersion": {
+          "": {
+            "value": "None",
+            "selected": 1
+          },
+          "SSLv3": {
+            "value": "SSLv3",
+            "selected": 0
+          },
+          "TLSv1.0": {
+            "value": "TLSv1.0",
+            "selected": 0
+          },
+          "TLSv1.1": {
+            "value": "TLSv1.1",
+            "selected": 0
+          },
+          "TLSv1.2": {
+            "value": "TLSv1.2",
+            "selected": 0
+          },
+          "TLSv1.3": {
+            "value": "TLSv1.3",
+            "selected": 0
+          }
+        },
+        "ssl_cipherList": "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-SHA384:ECDHE-ECDSA-AES128-SHA256",
+        "ssl_cipherSuites": "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
+        "h2_initialWindowSize": "",
+        "h2_initialWindowSizeOutgoing": "",
+        "h2_initialWindowSizeIncoming": "",
+        "h2_maxConcurrentStreams": "",
+        "h2_maxConcurrentStreamsOutgoing": "",
+        "h2_maxConcurrentStreamsIncoming": ""
+      },
+      "defaults": {
+        "maxConnections": "",
+        "maxConnectionsServers": "",
+        "timeoutClient": "30s",
+        "timeoutConnect": "30s",
+        "timeoutCheck": "",
+        "timeoutServer": "30s",
+        "retries": "3",
+        "redispatch": {
+          "": {
+            "value": "None",
+            "selected": 0
+          },
+          "x3": {
+            "value": "redispatch on every 3rd retry",
+            "selected": 0
+          },
+          "x2": {
+            "value": "redispatch on every 2nd retry",
+            "selected": 0
+          },
+          "x1": {
+            "value": "redispatch on every retry",
+            "selected": 0
+          },
+          "x0": {
+            "value": "Disable redispatching",
+            "selected": 0
+          },
+          "x-1": {
+            "value": "redispatch on the last retry [default]",
+            "selected": 1
+          },
+          "x-2": {
+            "value": "redispatch on the 2nd retry prior to the last retry",
+            "selected": 0
+          },
+          "x-3": {
+            "value": "redispatch on the 3rd retry prior to the last retry",
+            "selected": 0
+          }
+        },
+        "init_addr": {
+          "last": {
+            "value": "last",
+            "selected": 1
+          },
+          "libc": {
+            "value": "libc",
+            "selected": 1
+          },
+          "none": {
+            "value": "none",
+            "selected": 0
+          }
+        },
+        "customOptions": ""
+      },
+      "logging": {
+        "host": "127.0.0.1",
+        "facility": {
+          "alert": {
+            "value": "alert",
+            "selected": 0
+          },
+          "audit": {
+            "value": "audit",
+            "selected": 0
+          },
+          "auth2": {
+            "value": "auth2",
+            "selected": 0
+          },
+          "auth": {
+            "value": "auth",
+            "selected": 0
+          },
+          "cron2": {
+            "value": "cron2",
+            "selected": 0
+          },
+          "cron": {
+            "value": "cron",
+            "selected": 0
+          },
+          "daemon": {
+            "value": "daemon",
+            "selected": 0
+          },
+          "ftp": {
+            "value": "ftp",
+            "selected": 0
+          },
+          "kern": {
+            "value": "kern",
+            "selected": 0
+          },
+          "local0": {
+            "value": "local0 [default]",
+            "selected": 1
+          },
+          "local1": {
+            "value": "local1",
+            "selected": 0
+          },
+          "local2": {
+            "value": "local2",
+            "selected": 0
+          },
+          "local3": {
+            "value": "local3",
+            "selected": 0
+          },
+          "local4": {
+            "value": "local4",
+            "selected": 0
+          },
+          "local5": {
+            "value": "local5",
+            "selected": 0
+          },
+          "local6": {
+            "value": "local6",
+            "selected": 0
+          },
+          "local7": {
+            "value": "local7",
+            "selected": 0
+          },
+          "lpr": {
+            "value": "lpr",
+            "selected": 0
+          },
+          "mail": {
+            "value": "mail",
+            "selected": 0
+          },
+          "news": {
+            "value": "news",
+            "selected": 0
+          },
+          "ntp": {
+            "value": "ntp",
+            "selected": 0
+          },
+          "syslog": {
+            "value": "syslog",
+            "selected": 0
+          },
+          "user": {
+            "value": "user",
+            "selected": 0
+          },
+          "uucp": {
+            "value": "uucp",
+            "selected": 0
+          }
+        },
+        "level": {
+          "": {
+            "value": "None",
+            "selected": 0
+          },
+          "alert": {
+            "value": "alert",
+            "selected": 0
+          },
+          "crit": {
+            "value": "crit",
+            "selected": 0
+          },
+          "debug": {
+            "value": "debug",
+            "selected": 0
+          },
+          "emerg": {
+            "value": "emerg",
+            "selected": 0
+          },
+          "err": {
+            "value": "err",
+            "selected": 0
+          },
+          "info": {
+            "value": "info [default]",
+            "selected": 1
+          },
+          "notice": {
+            "value": "notice",
+            "selected": 0
+          },
+          "warning": {
+            "value": "warning",
+            "selected": 0
+          }
+        },
+        "length": ""
+      },
+      "stats": {
+        "enabled": "0",
+        "port": "8822",
+        "remoteEnabled": "0",
+        "remoteBind": {
+          "": {
+            "value": "",
+            "selected": 1
+          }
+        },
+        "authEnabled": "0",
+        "users": {
+          "": {
+            "value": "",
+            "selected": 1
+          }
+        },
+        "allowedUsers": [],
+        "allowedGroups": [],
+        "customOptions": "",
+        "prometheus_enabled": "0",
+        "prometheus_bind": {
+          "*:8404": {
+            "value": "*:8404",
+            "selected": 1
+          }
+        },
+        "prometheus_path": "/metrics"
+      },
+      "cache": {
+        "enabled": "0",
+        "totalMaxSize": "4",
+        "maxAge": "60",
+        "maxObjectSize": "",
+        "processVary": "0",
+        "maxSecondaryEntries": "10"
+      }
+    },
+    "frontends": {
+      "frontend": []
+    },
+    "backends": {
+      "backend": []
+    },
+    "servers": {
+      "server": {
+        "c4d34973-77d7-42d6-be28-a8b290bc0e51": {
+          "id": "69aba09d2914d2.74236327",
+          "enabled": "1",
+          "name": "asdf",
+          "description": "asdf",
+          "address": "1.2.3.4",
+          "port": "",
+          "checkport": "",
+          "mode": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "active": {
+              "value": "active [default]",
+              "selected": 1
+            },
+            "backup": {
+              "value": "backup",
+              "selected": 0
+            },
+            "disabled": {
+              "value": "disabled",
+              "selected": 0
+            }
+          },
+          "multiplexer_protocol": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "unspecified": {
+              "value": "auto-selection [recommended]",
+              "selected": 1
+            },
+            "fcgi": {
+              "value": "FastCGI",
+              "selected": 0
+            },
+            "h2": {
+              "value": "HTTP/2",
+              "selected": 0
+            },
+            "h1": {
+              "value": "HTTP/1.1",
+              "selected": 0
+            }
+          },
+          "type": {
+            "static": {
+              "value": "static",
+              "selected": 1
+            },
+            "template": {
+              "value": "template",
+              "selected": 0
+            },
+            "unix": {
+              "value": "unix socket",
+              "selected": 0
+            }
+          },
+          "serviceName": "",
+          "number": "",
+          "linkedResolver": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "resolverOpts": {
+            "allow-dup-ip": {
+              "value": "allow-dup-ip",
+              "selected": 0
+            },
+            "ignore-weight": {
+              "value": "ignore-weight",
+              "selected": 0
+            },
+            "prevent-dup-ip": {
+              "value": "prevent-dup-ip",
+              "selected": 0
+            }
+          },
+          "resolvePrefer": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "ipv4": {
+              "value": "prefer IPv4",
+              "selected": 0
+            },
+            "ipv6": {
+              "value": "prefer IPv6 [default]",
+              "selected": 0
+            }
+          },
+          "ssl": "0",
+          "sslSNI": "",
+          "sslSNIExpr": "",
+          "sslVerify": "1",
+          "sslCA": {
+            "694edd94d7ab4": {
+              "value": "(STAGING) Riddling Rhubarb R12 (ACME Client)",
+              "selected": 0
+            },
+            "694f0f52e6ada": {
+              "value": "(STAGING) Tenuous Tomato R13 (ACME Client)",
+              "selected": 0
+            },
+            "6951cdc904988": {
+              "value": "R12 (ACME Client)",
+              "selected": 0
+            }
+          },
+          "sslCRL": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "sslClientCertificate": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "694edd94e10ff": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6951cf386e53b": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6876dc3653b30": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            },
+            "6876e71b1f0d7": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            }
+          },
+          "maxConnections": "",
+          "weight": "",
+          "checkInterval": "",
+          "checkDownInterval": "",
+          "source": "",
+          "advanced": "",
+          "unix_socket": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          }
+        },
+        "c2a63147-151b-476b-8cb9-6a2373373f14": {
+          "id": "69aba1c70688c4.33350252",
+          "enabled": "1",
+          "name": "k3s211",
+          "description": "k3s ingress node — managed by Ansible",
+          "address": "192.168.42.211",
+          "port": "443",
+          "checkport": "443",
+          "mode": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "active": {
+              "value": "active [default]",
+              "selected": 1
+            },
+            "backup": {
+              "value": "backup",
+              "selected": 0
+            },
+            "disabled": {
+              "value": "disabled",
+              "selected": 0
+            }
+          },
+          "multiplexer_protocol": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "unspecified": {
+              "value": "auto-selection [recommended]",
+              "selected": 1
+            },
+            "fcgi": {
+              "value": "FastCGI",
+              "selected": 0
+            },
+            "h2": {
+              "value": "HTTP/2",
+              "selected": 0
+            },
+            "h1": {
+              "value": "HTTP/1.1",
+              "selected": 0
+            }
+          },
+          "type": {
+            "static": {
+              "value": "static",
+              "selected": 1
+            },
+            "template": {
+              "value": "template",
+              "selected": 0
+            },
+            "unix": {
+              "value": "unix socket",
+              "selected": 0
+            }
+          },
+          "serviceName": "",
+          "number": "",
+          "linkedResolver": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "resolverOpts": {
+            "allow-dup-ip": {
+              "value": "allow-dup-ip",
+              "selected": 0
+            },
+            "ignore-weight": {
+              "value": "ignore-weight",
+              "selected": 0
+            },
+            "prevent-dup-ip": {
+              "value": "prevent-dup-ip",
+              "selected": 0
+            }
+          },
+          "resolvePrefer": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "ipv4": {
+              "value": "prefer IPv4",
+              "selected": 0
+            },
+            "ipv6": {
+              "value": "prefer IPv6 [default]",
+              "selected": 0
+            }
+          },
+          "ssl": "1",
+          "sslSNI": "",
+          "sslSNIExpr": "",
+          "sslVerify": "1",
+          "sslCA": {
+            "694edd94d7ab4": {
+              "value": "(STAGING) Riddling Rhubarb R12 (ACME Client)",
+              "selected": 0
+            },
+            "694f0f52e6ada": {
+              "value": "(STAGING) Tenuous Tomato R13 (ACME Client)",
+              "selected": 0
+            },
+            "6951cdc904988": {
+              "value": "R12 (ACME Client)",
+              "selected": 0
+            }
+          },
+          "sslCRL": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "sslClientCertificate": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "694edd94e10ff": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6951cf386e53b": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6876dc3653b30": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            },
+            "6876e71b1f0d7": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            }
+          },
+          "maxConnections": "",
+          "weight": "",
+          "checkInterval": "",
+          "checkDownInterval": "",
+          "source": "",
+          "advanced": "",
+          "unix_socket": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          }
+        },
+        "47bd14b3-620a-4752-bda6-04d4c68c0d79": {
+          "id": "69aba1d2993927.67143461",
+          "enabled": "1",
+          "name": "k3s212",
+          "description": "k3s ingress node — managed by Ansible",
+          "address": "192.168.42.212",
+          "port": "443",
+          "checkport": "443",
+          "mode": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "active": {
+              "value": "active [default]",
+              "selected": 1
+            },
+            "backup": {
+              "value": "backup",
+              "selected": 0
+            },
+            "disabled": {
+              "value": "disabled",
+              "selected": 0
+            }
+          },
+          "multiplexer_protocol": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "unspecified": {
+              "value": "auto-selection [recommended]",
+              "selected": 1
+            },
+            "fcgi": {
+              "value": "FastCGI",
+              "selected": 0
+            },
+            "h2": {
+              "value": "HTTP/2",
+              "selected": 0
+            },
+            "h1": {
+              "value": "HTTP/1.1",
+              "selected": 0
+            }
+          },
+          "type": {
+            "static": {
+              "value": "static",
+              "selected": 1
+            },
+            "template": {
+              "value": "template",
+              "selected": 0
+            },
+            "unix": {
+              "value": "unix socket",
+              "selected": 0
+            }
+          },
+          "serviceName": "",
+          "number": "",
+          "linkedResolver": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "resolverOpts": {
+            "allow-dup-ip": {
+              "value": "allow-dup-ip",
+              "selected": 0
+            },
+            "ignore-weight": {
+              "value": "ignore-weight",
+              "selected": 0
+            },
+            "prevent-dup-ip": {
+              "value": "prevent-dup-ip",
+              "selected": 0
+            }
+          },
+          "resolvePrefer": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "ipv4": {
+              "value": "prefer IPv4",
+              "selected": 0
+            },
+            "ipv6": {
+              "value": "prefer IPv6 [default]",
+              "selected": 0
+            }
+          },
+          "ssl": "1",
+          "sslSNI": "",
+          "sslSNIExpr": "",
+          "sslVerify": "1",
+          "sslCA": {
+            "694edd94d7ab4": {
+              "value": "(STAGING) Riddling Rhubarb R12 (ACME Client)",
+              "selected": 0
+            },
+            "694f0f52e6ada": {
+              "value": "(STAGING) Tenuous Tomato R13 (ACME Client)",
+              "selected": 0
+            },
+            "6951cdc904988": {
+              "value": "R12 (ACME Client)",
+              "selected": 0
+            }
+          },
+          "sslCRL": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "sslClientCertificate": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "694edd94e10ff": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6951cf386e53b": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6876dc3653b30": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            },
+            "6876e71b1f0d7": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            }
+          },
+          "maxConnections": "",
+          "weight": "",
+          "checkInterval": "",
+          "checkDownInterval": "",
+          "source": "",
+          "advanced": "",
+          "unix_socket": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          }
+        },
+        "aa088947-fdf1-425e-b2f6-1ceab9efa1e7": {
+          "id": "69aba1de41ea30.15711353",
+          "enabled": "1",
+          "name": "k3s213",
+          "description": "k3s ingress node — managed by Ansible",
+          "address": "192.168.42.213",
+          "port": "443",
+          "checkport": "443",
+          "mode": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "active": {
+              "value": "active [default]",
+              "selected": 1
+            },
+            "backup": {
+              "value": "backup",
+              "selected": 0
+            },
+            "disabled": {
+              "value": "disabled",
+              "selected": 0
+            }
+          },
+          "multiplexer_protocol": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "unspecified": {
+              "value": "auto-selection [recommended]",
+              "selected": 1
+            },
+            "fcgi": {
+              "value": "FastCGI",
+              "selected": 0
+            },
+            "h2": {
+              "value": "HTTP/2",
+              "selected": 0
+            },
+            "h1": {
+              "value": "HTTP/1.1",
+              "selected": 0
+            }
+          },
+          "type": {
+            "static": {
+              "value": "static",
+              "selected": 1
+            },
+            "template": {
+              "value": "template",
+              "selected": 0
+            },
+            "unix": {
+              "value": "unix socket",
+              "selected": 0
+            }
+          },
+          "serviceName": "",
+          "number": "",
+          "linkedResolver": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "resolverOpts": {
+            "allow-dup-ip": {
+              "value": "allow-dup-ip",
+              "selected": 0
+            },
+            "ignore-weight": {
+              "value": "ignore-weight",
+              "selected": 0
+            },
+            "prevent-dup-ip": {
+              "value": "prevent-dup-ip",
+              "selected": 0
+            }
+          },
+          "resolvePrefer": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "ipv4": {
+              "value": "prefer IPv4",
+              "selected": 0
+            },
+            "ipv6": {
+              "value": "prefer IPv6 [default]",
+              "selected": 0
+            }
+          },
+          "ssl": "1",
+          "sslSNI": "",
+          "sslSNIExpr": "",
+          "sslVerify": "1",
+          "sslCA": {
+            "694edd94d7ab4": {
+              "value": "(STAGING) Riddling Rhubarb R12 (ACME Client)",
+              "selected": 0
+            },
+            "694f0f52e6ada": {
+              "value": "(STAGING) Tenuous Tomato R13 (ACME Client)",
+              "selected": 0
+            },
+            "6951cdc904988": {
+              "value": "R12 (ACME Client)",
+              "selected": 0
+            }
+          },
+          "sslCRL": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "sslClientCertificate": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "694edd94e10ff": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6951cf386e53b": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6876dc3653b30": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            },
+            "6876e71b1f0d7": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            }
+          },
+          "maxConnections": "",
+          "weight": "",
+          "checkInterval": "",
+          "checkDownInterval": "",
+          "source": "",
+          "advanced": "",
+          "unix_socket": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          }
+        },
+        "8c827a1e-e174-4f9c-9b01-01b5f3c49baf": {
+          "id": "69aba6ec8c8618.32263008",
+          "enabled": "1",
+          "name": "opnsense-gui",
+          "description": "OPNsense GUI HTTP — managed by Ansible",
+          "address": "127.0.0.1",
+          "port": "8080",
+          "checkport": "8080",
+          "mode": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "active": {
+              "value": "active [default]",
+              "selected": 1
+            },
+            "backup": {
+              "value": "backup",
+              "selected": 0
+            },
+            "disabled": {
+              "value": "disabled",
+              "selected": 0
+            }
+          },
+          "multiplexer_protocol": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "unspecified": {
+              "value": "auto-selection [recommended]",
+              "selected": 1
+            },
+            "fcgi": {
+              "value": "FastCGI",
+              "selected": 0
+            },
+            "h2": {
+              "value": "HTTP/2",
+              "selected": 0
+            },
+            "h1": {
+              "value": "HTTP/1.1",
+              "selected": 0
+            }
+          },
+          "type": {
+            "static": {
+              "value": "static",
+              "selected": 1
+            },
+            "template": {
+              "value": "template",
+              "selected": 0
+            },
+            "unix": {
+              "value": "unix socket",
+              "selected": 0
+            }
+          },
+          "serviceName": "",
+          "number": "",
+          "linkedResolver": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "resolverOpts": {
+            "allow-dup-ip": {
+              "value": "allow-dup-ip",
+              "selected": 0
+            },
+            "ignore-weight": {
+              "value": "ignore-weight",
+              "selected": 0
+            },
+            "prevent-dup-ip": {
+              "value": "prevent-dup-ip",
+              "selected": 0
+            }
+          },
+          "resolvePrefer": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "ipv4": {
+              "value": "prefer IPv4",
+              "selected": 0
+            },
+            "ipv6": {
+              "value": "prefer IPv6 [default]",
+              "selected": 0
+            }
+          },
+          "ssl": "0",
+          "sslSNI": "",
+          "sslSNIExpr": "",
+          "sslVerify": "1",
+          "sslCA": {
+            "694edd94d7ab4": {
+              "value": "(STAGING) Riddling Rhubarb R12 (ACME Client)",
+              "selected": 0
+            },
+            "694f0f52e6ada": {
+              "value": "(STAGING) Tenuous Tomato R13 (ACME Client)",
+              "selected": 0
+            },
+            "6951cdc904988": {
+              "value": "R12 (ACME Client)",
+              "selected": 0
+            }
+          },
+          "sslCRL": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "sslClientCertificate": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "694edd94e10ff": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6951cf386e53b": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6876dc3653b30": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            },
+            "6876e71b1f0d7": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            }
+          },
+          "maxConnections": "",
+          "weight": "",
+          "checkInterval": "",
+          "checkDownInterval": "",
+          "source": "",
+          "advanced": "",
+          "unix_socket": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          }
+        },
+        "ec62f307-e4a9-4437-b83e-1721e0b3a039": {
+          "id": "69aba6f8384f26.93481110",
+          "enabled": "1",
+          "name": "fw-ssl-loopback",
+          "description": "Loopback to fw HTTPS frontend — managed by Ansible",
+          "address": "127.0.0.1",
+          "port": "8444",
+          "checkport": "8444",
+          "mode": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "active": {
+              "value": "active [default]",
+              "selected": 1
+            },
+            "backup": {
+              "value": "backup",
+              "selected": 0
+            },
+            "disabled": {
+              "value": "disabled",
+              "selected": 0
+            }
+          },
+          "multiplexer_protocol": {
+            "": {
+              "value": "None",
+              "selected": 0
+            },
+            "unspecified": {
+              "value": "auto-selection [recommended]",
+              "selected": 1
+            },
+            "fcgi": {
+              "value": "FastCGI",
+              "selected": 0
+            },
+            "h2": {
+              "value": "HTTP/2",
+              "selected": 0
+            },
+            "h1": {
+              "value": "HTTP/1.1",
+              "selected": 0
+            }
+          },
+          "type": {
+            "static": {
+              "value": "static",
+              "selected": 1
+            },
+            "template": {
+              "value": "template",
+              "selected": 0
+            },
+            "unix": {
+              "value": "unix socket",
+              "selected": 0
+            }
+          },
+          "serviceName": "",
+          "number": "",
+          "linkedResolver": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "resolverOpts": {
+            "allow-dup-ip": {
+              "value": "allow-dup-ip",
+              "selected": 0
+            },
+            "ignore-weight": {
+              "value": "ignore-weight",
+              "selected": 0
+            },
+            "prevent-dup-ip": {
+              "value": "prevent-dup-ip",
+              "selected": 0
+            }
+          },
+          "resolvePrefer": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "ipv4": {
+              "value": "prefer IPv4",
+              "selected": 0
+            },
+            "ipv6": {
+              "value": "prefer IPv6 [default]",
+              "selected": 0
+            }
+          },
+          "ssl": "0",
+          "sslSNI": "",
+          "sslSNIExpr": "",
+          "sslVerify": "1",
+          "sslCA": {
+            "694edd94d7ab4": {
+              "value": "(STAGING) Riddling Rhubarb R12 (ACME Client)",
+              "selected": 0
+            },
+            "694f0f52e6ada": {
+              "value": "(STAGING) Tenuous Tomato R13 (ACME Client)",
+              "selected": 0
+            },
+            "6951cdc904988": {
+              "value": "R12 (ACME Client)",
+              "selected": 0
+            }
+          },
+          "sslCRL": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          },
+          "sslClientCertificate": {
+            "": {
+              "value": "None",
+              "selected": 1
+            },
+            "694edd94e10ff": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6951cf386e53b": {
+              "value": "opnsense.pocai.net (ACME Client)",
+              "selected": 0
+            },
+            "6876dc3653b30": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            },
+            "6876e71b1f0d7": {
+              "value": "Web GUI TLS certificate",
+              "selected": 0
+            }
+          },
+          "maxConnections": "",
+          "weight": "",
+          "checkInterval": "",
+          "checkDownInterval": "",
+          "source": "",
+          "advanced": "",
+          "unix_socket": {
+            "": {
+              "value": "None",
+              "selected": 1
+            }
+          }
+        }
+      }
+    },
+    "healthchecks": {
+      "healthcheck": []
+    },
+    "acls": {
+      "acl": []
+    },
+    "actions": {
+      "action": []
+    },
+    "luas": {
+      "lua": []
+    },
+    "fcgis": {
+      "fcgi": []
+    },
+    "errorfiles": {
+      "errorfile": []
+    },
+    "mapfiles": {
+      "mapfile": []
+    },
+    "groups": {
+      "group": []
+    },
+    "users": {
+      "user": []
+    },
+    "cpus": {
+      "cpu": []
+    },
+    "resolvers": {
+      "resolver": []
+    },
+    "mailers": {
+      "mailer": []
+    },
+    "maintenance": {
+      "cronjobs": {
+        "syncCerts": "0",
+        "syncCertsCron": {
+          "": {
+            "value": "None",
+            "selected": 1
+          }
+        },
+        "updateOcsp": "0",
+        "updateOcspCron": {
+          "": {
+            "value": "None",
+            "selected": 1
+          }
+        },
+        "reloadService": "0",
+        "reloadServiceCron": {
+          "": {
+            "value": "None",
+            "selected": 1
+          }
+        },
+        "restartService": "0",
+        "restartServiceCron": {
+          "": {
+            "value": "None",
+            "selected": 1
+          }
+        }
+      }
+    }
+  }
+}
