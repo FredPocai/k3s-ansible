@@ -1,5 +1,5 @@
 ---
-# roles/ingress-nginx/tasks/main.yml
+# roles/ingress-nginx/tasks/main.yaml
 # Installs ingress-nginx via Helm as a DaemonSet with hostNetwork.
 # nginx binds directly to ports 80/443 on each node's 192.168.x.x IP.
 # Point OPNsense Caddy or DNS round-robin at 192.168.x.211-213.

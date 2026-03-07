@@ -1,0 +1,29 @@
+---
+# roles/prereqs/tasks/packages-apt.yaml
+# Package installation for Debian/Ubuntu.
+# Called from main.yaml when ansible_os_family == 'Debian'.
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install required packages (apt)
+  ansible.builtin.apt:
+    name:
+      - open-iscsi      # required by Longhorn
+      - nfs-common      # NFS client for TrueNAS mounts
+      - cryptsetup      # required by Longhorn
+      - curl
+      - jq
+      - util-linux
+      - e2fsprogs
+      - python3-apt     # required for Ansible apt module
+    state: present
+
+- name: Enable and start iscsid (required by Longhorn)
+  ansible.builtin.systemd:
+    name: iscsid
+    enabled: true
+    state: started
+    daemon_reload: true

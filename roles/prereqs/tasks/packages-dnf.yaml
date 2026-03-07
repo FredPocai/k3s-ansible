@@ -1,0 +1,79 @@
+---
+# roles/prereqs/tasks/packages-dnf.yaml
+# Package installation for RedHat/Oracle Linux 9.
+# Called from main.yaml when ansible_os_family == 'RedHat'.
+#
+# Package name differences vs Ubuntu:
+#   open-iscsi      → iscsi-initiator-utils
+#   nfs-common      → nfs-utils
+#   cryptsetup      → cryptsetup          (same)
+#   e2fsprogs       → e2fsprogs           (same)
+#   util-linux      → util-linux          (same)
+#   python3-apt     → python3-dnf         (managed by dnf itself, usually present)
+#
+# OL9 uses iscsid service name same as Ubuntu: iscsid
+
+- name: Enable required EPEL repository (Oracle Linux 9)
+  ansible.builtin.dnf:
+    name: oracle-epel-release-el9
+    state: present
+  when: ansible_distribution == 'OracleLinux'
+
+- name: Enable required EPEL repository (RHEL 9 / Rocky 9 / AlmaLinux 9)
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+  when:
+    - ansible_distribution != 'OracleLinux'
+    - ansible_os_family == 'RedHat'
+
+- name: Install required packages (dnf)
+  ansible.builtin.dnf:
+    name:
+      - iscsi-initiator-utils   # required by Longhorn (open-iscsi equivalent)
+      - nfs-utils               # NFS client for TrueNAS mounts
+      - cryptsetup              # required by Longhorn
+      - curl
+      - jq
+      - util-linux
+      - e2fsprogs
+      - tar                     # required by k3s installer
+      - socat                   # required by some k3s components
+    state: present
+
+- name: Enable and start iscsid (required by Longhorn)
+  ansible.builtin.systemd:
+    name: iscsid
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# firewalld is enabled by default on OL9/RHEL9 and will block cluster traffic.
+# We open the required ports rather than disabling firewalld entirely.
+# k3s ports: 6443 (API), 10250 (kubelet), 2379-2380 (etcd), 51820/UDP (WireGuard/flannel),
+#            4789/UDP (VXLAN), 8472/UDP (flannel VXLAN), 179/TCP (BGP/Calico)
+# Longhorn: 9500-9510 (manager), 9503 (instance manager)
+# ingress-nginx: 80, 443
+
+- name: Check if firewalld is installed and running
+  ansible.builtin.service_facts:
+
+- name: Open required ports in firewalld (if active)
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop:
+    - "6443/tcp"        # k3s API server
+    - "10250/tcp"       # kubelet metrics
+    - "2379-2380/tcp"   # etcd client + peer
+    - "8472/udp"        # flannel VXLAN (disabled but harmless to open)
+    - "4789/udp"        # VXLAN
+    - "179/tcp"         # BGP (Calico)
+    - "9500-9510/tcp"   # Longhorn manager
+    - "80/tcp"          # ingress-nginx HTTP
+    - "443/tcp"         # ingress-nginx HTTPS
+  when:
+    - "'firewalld.service' in ansible_facts.services"
+    - ansible_facts.services['firewalld.service'].state == 'running'

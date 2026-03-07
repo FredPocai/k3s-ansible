@@ -4,9 +4,12 @@ ansible_ssh_private_key_file: ~/.ssh/id_ed25519
 ansible_python_interpreter: /usr/bin/python3
 
 # ── Network interfaces ────────────────────────────────────────────
+# Ubuntu 24.04 (Proxmox VMs via VirtIO): typically enp6s18 / enp6s19
+# Oracle Linux 9 (VMware/KVM):           typically ens18 / ens19
+# Adjust per environment in host_vars or a separate group_vars file.
 k3s_iface: enp6s18                              # Internal network (192.168.x.0/24) — cluster traffic
 storage_iface: enp6s19                          # Storage network (192.168.1xx.0/24) — Longhorn + NFS/iSCSI
-k3s_gateway: 192.168.1xx.254                    # OPNsense LAN physical IP — default gateway
+k3s_gateway: 192.168.x.254                      # OPNsense LAN physical IP — default gateway
 
 # ── Domain ────────────────────────────────────────────────────────
 base_domain: homelab.internal                   # Base domain — services exposed as <n>.{{ base_domain }}
@@ -16,7 +19,7 @@ opnsense_host: "192.168.x.254"                  # IP used to reach OPNsense
 opnsense_lan_ip: "192.168.x.254"                # LAN IP HAProxy frontends bind to
 
 opnsense_api_base: "http://192.168.x.254:8080"  # OPNsense GUI currently HTTP on :8080
-                                                # Upda  te to https://<host>:8443 after
+                                                # Update to https://<host>:443 after
                                                 # confirming fw.{{ base_domain }} works
                                                 # opnsense_api_key, opnsense_api_secret → vault
 
@@ -41,6 +44,21 @@ k3s_services:
   - { name: headlamp, hostname: "headlamp.homelab.internal" }
   - { name: longhorn, hostname: "longhorn.homelab.internal" }
 
+# ── OPNsense Dynamic DNS (replaces os-ddclient) ───────────────────
+# Uses the built-in OPNsense Dynamic DNS service — no plugin required.
+# Set opnsense_ddns_enabled: true and list your public hostname(s).
+# Requires cloudflare_api_token and cloudflare_zone_id in vault/group_vars.
+opnsense_ddns_enabled: false
+opnsense_ddns_hosts: []
+  # - "myhome.example.com"
+opnsense_wan_interface: "wan"                   # Check GUI → Interfaces → Assignments
+
+# ── OPNsense stale plugin cleanup ────────────────────────────────
+# Removes config stubs for plugins that were present in a restored config
+# but are not installed (suppresses "missing plugin" warnings in GUI).
+# Set false if you intentionally have os-caddy or os-ddclient installed.
+opnsense_remove_stale_plugins: true
+
 # ── k3s ───────────────────────────────────────────────────────────
 k3s_version: ""
 k3s_config_dir: /etc/rancher/k3s
@@ -51,8 +69,8 @@ k3s_cluster_cidr: "10.42.0.0/16"
 k3s_service_cidr: "10.43.0.0/16"
 k3s_cluster_dns:  "10.43.0.10"
 
-
-
-
-
-
+# ── SELinux (RedHat/Oracle Linux only) ───────────────────────────
+# 'permissive' is required for k3s + Calico + Longhorn without loading
+# the k3s-selinux policy RPM. Set 'enforcing' only after installing
+# and validating the k3s-selinux RPM from rancher-latest repo.
+selinux_mode: permissive

@@ -1,0 +1,107 @@
+---
+# roles/opnsense-plugins/tasks/main.yaml
+#
+# Installs OPNsense plugins required by downstream roles and removes stale
+# plugin references left over from restored firewall configs.
+#
+# Plugins managed:
+#   os-haproxy     — load balancer / SNI router  (required by opnsense-haproxy)
+#   os-acme-client — ACME / Let's Encrypt        (required by opnsense-acme)
+#
+# Note: os-ddclient is NOT managed here. It is installed and configured by the
+# opnsense-ddclient role, which also handles its DynDNS account setup.
+#
+# Stale plugins suppressed (no-op if not installed):
+#   os-caddy       — replaced by HAProxy; suppress "missing plugin" GUI warning
+#
+# API notes:
+#   Detection:  GET  /api/core/firmware/info   → {"rows": [...]}
+#               /api/core/firmware/info returns product metadata, NOT package list
+#   Install:    POST /api/core/firmware/install/<name>  (per-package URL, OPNsense 24.x)
+#               The JSON-body variant {packages:[...]} does NOT work on 24.x
+#   Remove stub: POST /api/core/firmware/remove/<name>
+#
+# Tags: opnsense, opnsense-plugins
+
+- name: Get list of installed packages/plugins
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/core/firmware/info"
+    method: GET
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: _firmware_packages
+  delegate_to: localhost
+  tags: [opnsense, opnsense-plugins]
+
+- name: Set fact — installed package name list
+  ansible.builtin.set_fact:
+    _installed_pkg_names: >-
+      {{ _firmware_packages.json.rows | default([]) | map(attribute='name') | list }}
+  tags: [opnsense, opnsense-plugins]
+
+# Install os-haproxy ──────────────────────────────────────────────
+- name: Install os-haproxy (if not present)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/core/firmware/install/os-haproxy"
+    method: POST
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body: ""
+    status_code: [200]
+  delegate_to: localhost
+  when: "'os-haproxy' not in _installed_pkg_names"
+  register: _haproxy_install
+  tags: [opnsense, opnsense-plugins]
+
+# Install os-acme-client ──────────────────────────────────────────
+- name: Install os-acme-client (if not present)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/core/firmware/install/os-acme-client"
+    method: POST
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body: ""
+    status_code: [200]
+  delegate_to: localhost
+  when: "'os-acme-client' not in _installed_pkg_names"
+  register: _acme_install
+  tags: [opnsense, opnsense-plugins]
+
+- name: Wait for plugin installs to settle (firmware ops are async)
+  ansible.builtin.pause:
+    seconds: 60
+    prompt: "Waiting for OPNsense plugin installation to complete..."
+  when: _haproxy_install.changed or _acme_install.changed
+  tags: [opnsense, opnsense-plugins]
+
+# Remove stale plugin stubs ───────────────────────────────────────
+# OPNsense carries config stubs forward when you restore from backup.
+# Plugins that existed on the old firewall but are not installed will
+# show as "missing plugin" warnings in the GUI indefinitely.
+# Calling /remove/<name> drops the stub without touching anything else.
+# These are ignore_errors because the stub may already be gone.
+
+- name: Remove stale os-caddy plugin stub (suppress GUI warning)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/core/firmware/remove/os-caddy"
+    method: POST
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body: ""
+    status_code: [200]
+  delegate_to: localhost
+  when:
+    - opnsense_remove_stale_plugins | default(true)
+    - "'os-caddy' not in _installed_pkg_names"
+  ignore_errors: true
+  tags: [opnsense, opnsense-plugins]
+

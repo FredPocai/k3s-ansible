@@ -1,18 +1,18 @@
 ---
-# maintain.yml — Rolling maintenance playbook
+# maintain.yaml — Rolling maintenance playbook
 #
 # Safely updates all k3s nodes one at a time.
 # Handles both in-cluster nodes (cordon/drain/uncordon) and
 # nodes with a broken/partial install (k3s-uninstall.sh + reboot).
 #
 # Usage:
-#   ansible-playbook -i inventory/hosts.yml maintain.yml
+#   ansible-playbook -i inventory/hosts.yaml maintain.yaml
 #
 # To only run on a specific node:
-#   ansible-playbook -i inventory/hosts.yml maintain.yml --limit k3s211
+#   ansible-playbook -i inventory/hosts.yaml maintain.yaml --limit k3s211
 #
 # To do a dry-run (check what would be upgraded without applying):
-#   ansible-playbook -i inventory/hosts.yml maintain.yml --check
+#   ansible-playbook -i inventory/hosts.yaml maintain.yaml --check
 
 - name: Rolling node maintenance
   hosts: k3s_cluster

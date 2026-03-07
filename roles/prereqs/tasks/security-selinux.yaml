@@ -1,0 +1,48 @@
+---
+# roles/prereqs/tasks/security-selinux.yaml
+# SELinux configuration for RedHat/Oracle Linux 9.
+# Called from main.yaml when ansible_os_family == 'RedHat'.
+#
+# k3s with Calico CNI requires SELinux to be set to permissive mode.
+# Enforcing mode will block:
+#   - containerd and runc from creating namespaces
+#   - Calico from managing iptables/eBPF
+#   - Longhorn from mounting volumes via iSCSI
+#
+# We set permissive mode at runtime and persist it in /etc/selinux/config.
+# If your organization requires enforcing mode, the correct approach is to
+# install the k3s SELinux policy RPM (k3s-selinux) from rancher-latest repo
+# and set selinux_mode to 'enforcing' below — but that's an advanced path and
+# not covered here.
+#
+# Variable: selinux_mode (default: permissive)
+#   Set in group_vars to 'enforcing' only if you have loaded the k3s-selinux
+#   policy RPM and tested your environment.
+
+- name: Install SELinux policy utilities
+  ansible.builtin.dnf:
+    name:
+      - policycoreutils
+      - policycoreutils-python-utils
+      - setools-console
+    state: present
+
+- name: Set SELinux to permissive mode (runtime)
+  ansible.posix.selinux:
+    state: "{{ selinux_mode | default('permissive') }}"
+    policy: targeted
+
+- name: Persist SELinux mode in /etc/selinux/config
+  ansible.builtin.lineinfile:
+    path: /etc/selinux/config
+    regexp: '^SELINUX='
+    line: "SELINUX={{ selinux_mode | default('permissive') }}"
+
+- name: Report SELinux status
+  ansible.builtin.command: getenforce
+  register: selinux_status
+  changed_when: false
+
+- name: Print SELinux mode
+  ansible.builtin.debug:
+    msg: "SELinux is currently: {{ selinux_status.stdout }}"

@@ -1,9 +1,9 @@
 ---
-# roles/maintain/tasks/main.yml
+# roles/maintain/tasks/main.yaml
 #
 # Safe rolling maintenance for k3s nodes.
 # Run with:
-#   ansible-playbook -i inventory/hosts.yml maintain.yml
+#   ansible-playbook -i inventory/hosts.yaml maintain.yaml
 #
 # Node state detection (in order of precedence):
 #   1. k3s binary absent           → nothing to uninstall, skip to apt

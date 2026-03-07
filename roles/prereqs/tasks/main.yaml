@@ -1,0 +1,118 @@
+---
+# roles/prereqs/tasks/main.yaml
+# System preparation: hostname, /etc/hosts, packages, kernel params, disk, network.
+#
+# Distro-specific tasks are split into separate files and included based on
+# ansible_os_family:
+#
+#   packages-apt.yaml       — apt packages          (Debian / Ubuntu 24.04)
+#   packages-dnf.yaml       — dnf packages          (Oracle Linux 9, RHEL 9)
+#   security-apparmor.yaml  — AppArmor config       (Debian / Ubuntu)
+#   security-selinux.yaml   — SELinux config        (RedHat / Oracle Linux)
+#   network-netplan.yaml    — netplan static IPs    (Debian / Ubuntu)
+#   network-nmcli.yaml      — NetworkManager/nmcli  (RedHat / Oracle Linux)
+
+- name: Set hostname to inventory name
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Update /etc/hosts with cluster nodes
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} k3s cluster nodes"
+    block: |
+      {% for s in k3s_nodes %}
+      {{ s.ip }} {{ s.name }} {{ s.name }}.{{ base_domain }}
+      {% endfor %}
+
+# ── Distro-specific: packages ─────────────────────────────────────
+- name: Include apt package tasks (Debian/Ubuntu)
+  ansible.builtin.include_tasks: packages-apt.yaml
+  when: ansible_os_family == 'Debian'
+
+- name: Include dnf package tasks (RedHat/Oracle Linux)
+  ansible.builtin.include_tasks: packages-dnf.yaml
+  when: ansible_os_family == 'RedHat'
+
+# ── Kernel modules ────────────────────────────────────────────────
+- name: Load required kernel modules
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - iscsi_tcp
+    - overlay
+    - br_netfilter
+
+- name: Persist kernel modules across reboots
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k3s.conf
+    content: |
+      iscsi_tcp
+      overlay
+      br_netfilter
+    mode: "0644"
+
+# ── Sysctl ────────────────────────────────────────────────────────
+- name: Set required sysctl parameters
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - { name: "net.bridge.bridge-nf-call-iptables",  value: "1" }
+    - { name: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
+    - { name: "net.ipv4.ip_forward",                 value: "1" }
+    - { name: "net.ipv4.conf.all.rp_filter",         value: "0" }  # required by Calico
+    - { name: "net.ipv4.conf.default.rp_filter",     value: "0" }  # required by Calico
+
+# ── Distro-specific: security module ──────────────────────────────
+- name: Include AppArmor tasks (Debian/Ubuntu)
+  ansible.builtin.include_tasks: security-apparmor.yaml
+  when: ansible_os_family == 'Debian'
+
+- name: Include SELinux tasks (RedHat/Oracle Linux)
+  ansible.builtin.include_tasks: security-selinux.yaml
+  when: ansible_os_family == 'RedHat'
+
+# ── Distro-specific: network configuration ────────────────────────
+- name: Include netplan network tasks (Debian/Ubuntu)
+  ansible.builtin.include_tasks: network-netplan.yaml
+  when: ansible_os_family == 'Debian'
+
+- name: Include NetworkManager/nmcli network tasks (RedHat/Oracle Linux)
+  ansible.builtin.include_tasks: network-nmcli.yaml
+  when: ansible_os_family == 'RedHat'
+
+# ── Longhorn aux disk ─────────────────────────────────────────────
+# Prepares the secondary block device (longhorn_aux_device, e.g. /dev/sdb)
+# as an ext4 filesystem mounted at longhorn_data_path.
+# blkid check prevents re-formatting on re-runs.
+
+- name: Check if {{ longhorn_aux_device }} already has a filesystem
+  ansible.builtin.command: blkid -s TYPE -o value {{ longhorn_aux_device }}
+  register: _sdb_fs
+  changed_when: false
+  failed_when: false
+
+- name: Create ext4 filesystem on {{ longhorn_aux_device }} (if blank)
+  community.general.filesystem:
+    fstype: ext4
+    dev: "{{ longhorn_aux_device }}"
+  when: _sdb_fs.stdout == ""
+
+- name: Create Longhorn data directory
+  ansible.builtin.file:
+    path: "{{ longhorn_data_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Mount {{ longhorn_aux_device }} at {{ longhorn_data_path }}
+  ansible.posix.mount:
+    path: "{{ longhorn_data_path }}"
+    src: "{{ longhorn_aux_device }}"
+    fstype: ext4
+    opts: defaults,noatime
+    state: mounted

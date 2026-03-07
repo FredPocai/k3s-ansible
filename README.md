@@ -27,29 +27,29 @@ ansible-galaxy collection install community.general
 
 ### Verify SSH access
 ```bash
-ansible -i inventory/hosts.yml k3s_cluster -m ping
+ansible -i inventory/hosts.yaml k3s_cluster -m ping
 ```
 
 ### Confirm /dev/sdb is present and unformatted on each VM
 ```bash
-ansible -i inventory/hosts.yml k3s_cluster -m command -a "lsblk /dev/sdb" --become
+ansible -i inventory/hosts.yaml k3s_cluster -m command -a "lsblk /dev/sdb" --become
 ```
 
 ## Deployment
 
 ### Full deploy (recommended first run)
 ```bash
-ansible-playbook -i inventory/hosts.yml site.yml
+ansible-playbook -i inventory/hosts.yaml site.yaml
 ```
 
 ### Individual phases (useful for re-runs or troubleshooting)
 ```bash
-ansible-playbook -i inventory/hosts.yml site.yml --tags prereqs
-ansible-playbook -i inventory/hosts.yml site.yml --tags k3s
-ansible-playbook -i inventory/hosts.yml site.yml --tags calico
-ansible-playbook -i inventory/hosts.yml site.yml --tags longhorn
-ansible-playbook -i inventory/hosts.yml site.yml --tags ingress
-ansible-playbook -i inventory/hosts.yml site.yml --tags dashboard
+ansible-playbook -i inventory/hosts.yaml site.yaml --tags prereqs
+ansible-playbook -i inventory/hosts.yaml site.yaml --tags k3s
+ansible-playbook -i inventory/hosts.yaml site.yaml --tags calico
+ansible-playbook -i inventory/hosts.yaml site.yaml --tags longhorn
+ansible-playbook -i inventory/hosts.yaml site.yaml --tags ingress
+ansible-playbook -i inventory/hosts.yaml site.yaml --tags dashboard
 ```
 
 ## Post-deploy
@@ -93,24 +93,24 @@ kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80
 ### Enable Calico BGP peering with OPNsense
 1. Install FRR plugin on OPNsense
 2. Configure BGP on OPNsense (AS 65000 suggested)
-3. Apply BGPPeer and BGPConfiguration resources (templates in roles/calico/tasks/main.yml comments)
-4. Set `calico_bgp_enabled: true` in group_vars/all.yml and re-run `--tags calico`
+3. Apply BGPPeer and BGPConfiguration resources (templates in roles/calico/tasks/main.yaml comments)
+4. Set `calico_bgp_enabled: true` in group_vars/all.yaml and re-run `--tags calico`
 
 ## Vault setup (required before first run)
 
 Fill in your secrets, then optionally encrypt:
 ```bash
-# Edit vault/secrets.yml and fill in real values, then:
-ansible-vault encrypt vault/secrets.yml
+# Edit vault/secrets.yaml and fill in real values, then:
+ansible-vault encrypt vault/secrets.yaml
 
 # Run playbooks with vault:
-ansible-playbook -i inventory/hosts.yml site.yml --ask-vault-pass
+ansible-playbook -i inventory/hosts.yaml site.yaml --ask-vault-pass
 # or with a password file:
 echo "yourpassword" > ~/.vault_pass && chmod 600 ~/.vault_pass
-ansible-playbook -i inventory/hosts.yml site.yml --vault-password-file ~/.vault_pass
+ansible-playbook -i inventory/hosts.yaml site.yaml --vault-password-file ~/.vault_pass
 ```
 
-The `.gitignore` blocks `vault/secrets.yml` from being committed unencrypted.
+The `.gitignore` blocks `vault/secrets.yaml` from being committed unencrypted.
 Once encrypted with `ansible-vault`, it is safe to commit.
 
 ## Cloudflare scoped API token
@@ -119,13 +119,13 @@ Create at https://dash.cloudflare.com/profile/api-tokens → "Create Custom Toke
 - Zone > DNS > Edit — zone: homelab.internal
 - Zone > Zone > Read — zone: homelab.internal
 
-Paste the token into `vault/secrets.yml` as `cloudflare_api_token`.
+Paste the token into `vault/secrets.yaml` as `cloudflare_api_token`.
 
 ## OPNsense API credentials
 
 OPNsense GUI → System → Access → Users → your user → API keys.
 User needs the **Unbound DNS** privilege minimum.
-Paste key/secret into `vault/secrets.yml`.
+Paste key/secret into `vault/secrets.yaml`.
 
 ## cert-manager / TLS workflow
 
@@ -139,12 +139,12 @@ Paste key/secret into `vault/secrets.yml`.
 
 Rolling updates across all nodes (one at a time, cluster-safe):
 ```bash
-ansible-playbook -i inventory/hosts.yml maintain.yml
+ansible-playbook -i inventory/hosts.yaml maintain.yaml
 ```
 
 Single node only:
 ```bash
-ansible-playbook -i inventory/hosts.yml maintain.yml --limit k3s211
+ansible-playbook -i inventory/hosts.yaml maintain.yaml --limit k3s211
 ```
 
 The maintain role handles three states automatically:

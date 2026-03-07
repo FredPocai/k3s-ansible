@@ -1,0 +1,61 @@
+---
+# roles/prereqs/tasks/network-nmcli.yaml
+# Static network configuration for RedHat/Oracle Linux 9 via NetworkManager.
+# Called from main.yaml when ansible_os_family == 'RedHat'.
+#
+# OL9/RHEL9 use NetworkManager with nmcli — there is no netplan.
+# We configure both interfaces using the community.general.nmcli module.
+#
+# Variable requirements (same as Ubuntu, from group_vars/host_vars):
+#   k3s_iface:      primary NIC name (e.g. ens18)
+#   storage_iface:  storage NIC name (e.g. ens19)
+#   k3s_static_ip:  per-host primary IP (from inventory host_vars)
+#   k3s_storage_ip: per-host storage IP (from inventory host_vars)
+#   k3s_gateway:    default gateway IP
+#   opnsense_host:  DNS server IP
+#
+# Notes:
+#   - RHEL/OL9 NIC names often differ from Ubuntu (ens18 vs enp6s18).
+#     Set k3s_iface and storage_iface appropriately in inventory.
+#   - NetworkManager connection names are set to match the interface names
+#     for clarity; existing connections with the same name are modified.
+
+- name: Ensure NetworkManager is running
+  ansible.builtin.systemd:
+    name: NetworkManager
+    enabled: true
+    state: started
+
+- name: Configure primary NIC ({{ k3s_iface }}) — static IPv4
+  community.general.nmcli:
+    conn_name: "{{ k3s_iface }}"
+    ifname: "{{ k3s_iface }}"
+    type: ethernet
+    ip4: "{{ k3s_static_ip }}/24"
+    gw4: "{{ k3s_gateway }}"
+    dns4:
+      - "{{ opnsense_host }}"
+    dns4_search: []
+    method4: manual
+    method6: auto          # SLAAC on primary interface is fine
+    autoconnect: true
+    state: present
+  notify: Reload NetworkManager connections
+
+- name: Configure storage NIC ({{ storage_iface }}) — static IPv4, no IPv6
+  community.general.nmcli:
+    conn_name: "{{ storage_iface }}"
+    ifname: "{{ storage_iface }}"
+    type: ethernet
+    ip4: "{{ k3s_storage_ip }}/24"
+    dns4:
+      - "{{ opnsense_host }}"
+    dns4_search: []
+    method4: manual
+    method6: disabled      # no IPv6 on storage network
+    autoconnect: true
+    state: present
+  notify: Reload NetworkManager connections
+
+- name: Flush handlers (apply NM connections immediately)
+  ansible.builtin.meta: flush_handlers

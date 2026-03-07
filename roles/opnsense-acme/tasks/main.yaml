@@ -1,0 +1,255 @@
+---
+# roles/opnsense-acme/tasks/main.yaml
+#
+# Configures os-acme-client on OPNsense:
+#   - Creates a Let's Encrypt production ACME account
+#   - Creates a Cloudflare DNS-01 validation method
+#   - Creates and issues a certificate for fw.{{ base_domain }}
+#
+# Requires:
+#   opnsense_api_key, opnsense_api_secret  — vault
+#   cloudflare_api_token                   — vault  (Restricted API Token)
+#   cloudflare_account_id                  — vault or group_vars
+#   cloudflare_zone_id                     — vault or group_vars (optional)
+#   acme_email                             — group_vars
+#   base_domain                            — group_vars
+#
+# Cloudflare field mapping (confirmed from GET /api/acmeclient/validations/<uuid>):
+#   dns_cf_email      — Legacy Global API Key e-mail  (leave blank)
+#   dns_cf_key        — Legacy Global API Key          (leave blank)
+#   dns_cf_token      — Restricted API Token           <- USE THIS
+#   dns_cf_account_id — CF Account ID                  <- required with token
+#   dns_cf_zone_id    — CF Zone ID                     <- optional; acme.sh auto-detects
+#
+# NOTE: if the validation entry exists but has an empty dns_cf_token (because
+# it was created by a previous run that used the wrong field name), delete it
+# in the GUI (Services -> ACME Client -> Validation Methods) so this role can
+# recreate it correctly.
+#
+# Tags: opnsense, opnsense-acme
+
+# -- ACME Account --------------------------------------------------
+
+- name: Get existing ACME accounts
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/accounts/search"
+    method: GET
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: _acme_accounts
+  delegate_to: localhost
+  tags: [opnsense, opnsense-acme]
+
+- name: Create ACME account (letsencrypt-production)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/accounts/add/"
+    method: POST
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      account:
+        enabled: "1"
+        name: "letsencrypt-production"
+        email: "{{ acme_email }}"
+        url: "https://acme-v02.api.letsencrypt.org/directory"
+    status_code: [200]
+  delegate_to: localhost
+  when: >-
+    _acme_accounts.json.rows
+    | selectattr('name', 'equalto', 'letsencrypt-production')
+    | list | length == 0
+  tags: [opnsense, opnsense-acme]
+
+# -- Cloudflare DNS-01 validation ----------------------------------
+
+- name: Get existing ACME validation methods
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/validations/search"
+    method: GET
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: _acme_validations
+  delegate_to: localhost
+  tags: [opnsense, opnsense-acme]
+
+- name: Create Cloudflare DNS-01 validation method
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/validations/add/"
+    method: POST
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      validation:
+        enabled: "1"
+        name: "cloudflare-dns01"
+        description: "Cloudflare DNS-01 (Restricted API Token) — managed by Ansible"
+        method: "dns01"
+        dns_service: "dns_cf"
+        dns_cf_token: "{{ cloudflare_api_token }}"
+        dns_cf_account_id: "{{ cloudflare_account_id }}"
+        dns_cf_zone_id: "{{ cloudflare_zone_id | default('') }}"
+    status_code: [200]
+  delegate_to: localhost
+  no_log: true
+  when: >-
+    _acme_validations.json.rows
+    | selectattr('name', 'equalto', 'cloudflare-dns01')
+    | list | length == 0
+  tags: [opnsense, opnsense-acme]
+
+# -- Resolve UUIDs -------------------------------------------------
+
+- name: Fetch fresh ACME accounts and validations (with UUIDs)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/{{ item }}/search"
+    method: GET
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: _acme_lookup
+  loop:
+    - accounts
+    - validations
+  delegate_to: localhost
+  tags: [opnsense, opnsense-acme]
+
+- name: Set ACME account and validation UUID facts
+  ansible.builtin.set_fact:
+    acme_account_uuid: >-
+      {{
+        _acme_lookup.results[0].json.rows
+        | selectattr('name', 'equalto', 'letsencrypt-production')
+        | map(attribute='uuid') | first
+      }}
+    acme_validation_uuid: >-
+      {{
+        _acme_lookup.results[1].json.rows
+        | selectattr('name', 'equalto', 'cloudflare-dns01')
+        | map(attribute='uuid') | first
+      }}
+  tags: [opnsense, opnsense-acme]
+
+# -- Certificate ---------------------------------------------------
+
+- name: Get existing ACME certificates
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/certificates/search"
+    method: GET
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: _acme_certs
+  delegate_to: localhost
+  tags: [opnsense, opnsense-acme]
+
+- name: Create ACME certificate entry for fw.{{ base_domain }}
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/certificates/add/"
+    method: POST
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      certificate:
+        enabled: "1"
+        name: "fw.{{ base_domain }}"
+        description: "fw.{{ base_domain }} — managed by Ansible"
+        altNames: "fw.{{ base_domain }}"
+        account: "{{ acme_account_uuid }}"
+        validationMethod: "{{ acme_validation_uuid }}"
+        keyLength: "key_ec384"
+        autoRenewal: "1"
+        renewInterval: "60"
+        ocsp: "0"
+        profile: ""
+        restartActions: ""
+        aliasmode: "none"
+        domainalias: ""
+        challengealias: ""
+    status_code: [200]
+  delegate_to: localhost
+  when: >-
+    _acme_certs.json.rows
+    | selectattr('name', 'equalto', 'fw.' + base_domain)
+    | list | length == 0
+  register: _acme_cert_created
+  tags: [opnsense, opnsense-acme]
+
+- name: Fetch ACME certificates (with UUID, post-creation)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/certificates/search"
+    method: GET
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: _acme_certs_final
+  delegate_to: localhost
+  tags: [opnsense, opnsense-acme]
+
+- name: Fail clearly if cert entry was not created
+  ansible.builtin.fail:
+    msg: >-
+      ACME certificate 'fw.{{ base_domain }}' not found after creation attempt.
+      Check OPNsense GUI -> Services -> ACME Client -> Certificates.
+  when: >-
+    _acme_certs_final.json.rows
+    | selectattr('name', 'equalto', 'fw.' + base_domain)
+    | list | length == 0
+  tags: [opnsense, opnsense-acme]
+
+- name: Set ACME cert UUID fact
+  ansible.builtin.set_fact:
+    acme_cert_uuid: >-
+      {{
+        _acme_certs_final.json.rows
+        | selectattr('name', 'equalto', 'fw.' + base_domain)
+        | map(attribute='uuid') | first
+      }}
+  tags: [opnsense, opnsense-acme]
+
+# -- Issue certificate ---------------------------------------------
+# Only triggered when the cert entry was freshly created this run.
+# On re-runs the cert entry already exists; os-acme handles auto-renewal.
+
+- name: Issue fw.{{ base_domain }} certificate (Cloudflare DNS-01, ~90s)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/acmeclient/certificates/sign/{{ acme_cert_uuid }}"
+    method: POST
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+    timeout: 120
+  delegate_to: localhost
+  when: _acme_cert_created.changed | default(false)
+  tags: [opnsense, opnsense-acme]
+
+- name: Wait for Cloudflare DNS-01 and cert issuance (~90s)
+  ansible.builtin.pause:
+    seconds: 90
+    prompt: "Waiting for cert issuance and storage in OPNsense cert manager..."
+  when: _acme_cert_created.changed | default(false)
+  tags: [opnsense, opnsense-acme]
