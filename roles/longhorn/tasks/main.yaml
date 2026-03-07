@@ -1,5 +1,5 @@
 ---
-# roles/longhorn/tasks/main.yml
+# roles/longhorn/tasks/main.yaml
 # Installs Longhorn via Helm using a rendered values.yaml.
 # Longhorn replication traffic is directed to the storage interface (enp6s19).
 # UI is exposed at https://longhorn.{{ base_domain }}

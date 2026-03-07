@@ -1,5 +1,5 @@
 ---
-# roles/k3s-server/tasks/init.yml
+# roles/k3s-server/tasks/init.yaml
 # Runs only on k3s211 — bootstraps the embedded etcd cluster.
 
 - name: Check if k3s is already installed

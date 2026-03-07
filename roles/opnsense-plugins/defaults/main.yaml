@@ -1,5 +1,5 @@
 ---
-# roles/opnsense-plugins/defaults/main.yml
+# roles/opnsense-plugins/defaults/main.yaml
 
 # Set false if you intentionally have os-caddy or os-ddclient installed
 # and do not want their stubs removed.

@@ -1,7 +1,7 @@
 ---
-# roles/prereqs/tasks/network-netplan.yml
+# roles/prereqs/tasks/network-netplan.yaml
 # Static network configuration for Debian/Ubuntu via netplan.
-# Called from main.yml when ansible_os_family == 'Debian'.
+# Called from main.yaml when ansible_os_family == 'Debian'.
 #
 # Both interfaces are configured statically. DHCP is disabled on both
 # to prevent DHCP-advertised DNS servers from leaking into systemd-resolved

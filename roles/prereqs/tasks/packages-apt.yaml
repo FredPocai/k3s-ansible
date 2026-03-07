@@ -1,7 +1,7 @@
 ---
-# roles/prereqs/tasks/packages-apt.yml
+# roles/prereqs/tasks/packages-apt.yaml
 # Package installation for Debian/Ubuntu.
-# Called from main.yml when ansible_os_family == 'Debian'.
+# Called from main.yaml when ansible_os_family == 'Debian'.
 
 - name: Update apt cache
   ansible.builtin.apt:

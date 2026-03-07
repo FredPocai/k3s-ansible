@@ -1,15 +1,15 @@
 ---
-# site.yml — k3s homelab cluster deployment
+# site.yaml — k3s homelab cluster deployment
 #
 # Usage:
-#   Full deploy:        ansible-playbook -i inventory/hosts.yml site.yml --ask-vault-pass
-#   Single tag:         ansible-playbook -i inventory/hosts.yml site.yml --tags <tag> --ask-vault-pass
+#   Full deploy:        ansible-playbook -i inventory/hosts.yaml site.yaml --ask-vault-pass
+#   Single tag:         ansible-playbook -i inventory/hosts.yaml site.yaml --tags <tag> --ask-vault-pass
 #
 # Tags: prereqs, k3s, calico, cert-manager, longhorn, ingress, dashboard
 #
-# Vault: copy vault/secrets.example.yml → vault/secrets.yml, fill in values, then encrypt. cloudflare_api_token, opnsense_api_key,
+# Vault: copy vault/secrets.example.yaml → vault/secrets.yaml, fill in values, then encrypt. cloudflare_api_token, opnsense_api_key,
 #        opnsense_api_secret. Encrypt before committing:
-#          ansible-vault encrypt vault/secrets.yml
+#          ansible-vault encrypt vault/secrets.yaml
 
 # Load vault secrets into all plays
 - name: Load vault secrets
@@ -18,7 +18,7 @@
   tasks:
     - name: Include vault secrets
       ansible.builtin.include_vars:
-        file: vault/secrets.yml
+        file: vault/secrets.yaml
       tags: always
 
 # ── Phase 1: System prerequisites (all nodes in parallel) ─────────
@@ -65,7 +65,7 @@
   gather_facts: false
   tags: [cert-manager]
   vars_files:
-    - vault/secrets.yml
+    - vault/secrets.yaml
   roles:
     - cert-manager
 
@@ -94,7 +94,7 @@
   gather_facts: false
   tags: [dashboard]
   vars_files:
-    - vault/secrets.yml
+    - vault/secrets.yaml
   roles:
     - headlamp
 
@@ -108,9 +108,9 @@
   tags: [opnsense]
   tags: [opnsense, opnsense-plugins]
   vars_files:
-    - vault/secrets.yml
+    - vault/secrets.yaml
   roles:
-    - opnsense
+    # - opnsense
     - opnsense-plugins
 
 # ── Phase 10: OPNsense — ACME / Let's Encrypt ────────────────────
@@ -122,7 +122,7 @@
   gather_facts: false
   tags: [opnsense, opnsense-acme]
   vars_files:
-    - vault/secrets.yml
+    - vault/secrets.yaml
   roles:
     - opnsense-acme
 
@@ -137,6 +137,22 @@
   gather_facts: false
   tags: [opnsense, opnsense-haproxy]
   vars_files:
-    - vault/secrets.yml
+    - vault/secrets.yaml
   roles:
     - opnsense-haproxy
+
+
+# -- Phase 12: OPNsense -- ddclient (Dynamic DNS) ------------------
+# Installs os-ddclient and configures Cloudflare DynDNS for WAN IP updates.
+# Only runs when opnsense_ddns_hosts is non-empty.
+# Skip entirely with: --skip-tags opnsense-ddclient
+- name: Configure OPNsense ddclient (DynDNS)
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, opnsense-ddclient]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - role: opnsense-ddclient
+      when: opnsense_ddns_hosts | default([]) | length > 0

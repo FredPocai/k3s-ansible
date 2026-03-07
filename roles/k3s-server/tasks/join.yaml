@@ -1,5 +1,5 @@
 ---
-# roles/k3s-server/tasks/join.yml
+# roles/k3s-server/tasks/join.yaml
 # Runs on k3s212 and k3s213 — joins the existing etcd cluster.
 
 - name: Check if k3s is already installed

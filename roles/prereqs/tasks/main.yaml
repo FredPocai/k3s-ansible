@@ -1,16 +1,16 @@
 ---
-# roles/prereqs/tasks/main.yml
+# roles/prereqs/tasks/main.yaml
 # System preparation: hostname, /etc/hosts, packages, kernel params, disk, network.
 #
 # Distro-specific tasks are split into separate files and included based on
 # ansible_os_family:
 #
-#   packages-apt.yml       — apt packages          (Debian / Ubuntu 24.04)
-#   packages-dnf.yml       — dnf packages          (Oracle Linux 9, RHEL 9)
-#   security-apparmor.yml  — AppArmor config       (Debian / Ubuntu)
-#   security-selinux.yml   — SELinux config        (RedHat / Oracle Linux)
-#   network-netplan.yml    — netplan static IPs    (Debian / Ubuntu)
-#   network-nmcli.yml      — NetworkManager/nmcli  (RedHat / Oracle Linux)
+#   packages-apt.yaml       — apt packages          (Debian / Ubuntu 24.04)
+#   packages-dnf.yaml       — dnf packages          (Oracle Linux 9, RHEL 9)
+#   security-apparmor.yaml  — AppArmor config       (Debian / Ubuntu)
+#   security-selinux.yaml   — SELinux config        (RedHat / Oracle Linux)
+#   network-netplan.yaml    — netplan static IPs    (Debian / Ubuntu)
+#   network-nmcli.yaml      — NetworkManager/nmcli  (RedHat / Oracle Linux)
 
 - name: Set hostname to inventory name
   ansible.builtin.hostname:
@@ -27,11 +27,11 @@
 
 # ── Distro-specific: packages ─────────────────────────────────────
 - name: Include apt package tasks (Debian/Ubuntu)
-  ansible.builtin.include_tasks: packages-apt.yml
+  ansible.builtin.include_tasks: packages-apt.yaml
   when: ansible_os_family == 'Debian'
 
 - name: Include dnf package tasks (RedHat/Oracle Linux)
-  ansible.builtin.include_tasks: packages-dnf.yml
+  ansible.builtin.include_tasks: packages-dnf.yaml
   when: ansible_os_family == 'RedHat'
 
 # ── Kernel modules ────────────────────────────────────────────────
@@ -70,20 +70,20 @@
 
 # ── Distro-specific: security module ──────────────────────────────
 - name: Include AppArmor tasks (Debian/Ubuntu)
-  ansible.builtin.include_tasks: security-apparmor.yml
+  ansible.builtin.include_tasks: security-apparmor.yaml
   when: ansible_os_family == 'Debian'
 
 - name: Include SELinux tasks (RedHat/Oracle Linux)
-  ansible.builtin.include_tasks: security-selinux.yml
+  ansible.builtin.include_tasks: security-selinux.yaml
   when: ansible_os_family == 'RedHat'
 
 # ── Distro-specific: network configuration ────────────────────────
 - name: Include netplan network tasks (Debian/Ubuntu)
-  ansible.builtin.include_tasks: network-netplan.yml
+  ansible.builtin.include_tasks: network-netplan.yaml
   when: ansible_os_family == 'Debian'
 
 - name: Include NetworkManager/nmcli network tasks (RedHat/Oracle Linux)
-  ansible.builtin.include_tasks: network-nmcli.yml
+  ansible.builtin.include_tasks: network-nmcli.yaml
   when: ansible_os_family == 'RedHat'
 
 # ── Longhorn aux disk ─────────────────────────────────────────────

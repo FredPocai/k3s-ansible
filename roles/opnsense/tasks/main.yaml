@@ -1,5 +1,5 @@
 ---
-# roles/opnsense/tasks/main.yml
+# roles/opnsense/tasks/main.yaml
 #
 # Architecture:
 #

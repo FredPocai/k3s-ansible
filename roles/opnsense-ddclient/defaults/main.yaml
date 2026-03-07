@@ -1,0 +1,13 @@
+---
+# roles/opnsense-ddclient/defaults/main.yaml
+
+# WAN interface name as shown in OPNsense GUI -> Interfaces -> Assignments.
+# Common values: wan, igb0, em0, vtnet0
+opnsense_wan_interface: "wan"
+
+# List of public FQDNs to keep updated with the current WAN IP.
+# Must be non-empty to configure anything.
+# Example:
+#   opnsense_ddns_hosts:
+#     - "myhome.example.com"
+opnsense_ddns_hosts: []

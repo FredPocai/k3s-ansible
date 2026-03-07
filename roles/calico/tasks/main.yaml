@@ -1,5 +1,5 @@
 ---
-# roles/calico/tasks/main.yml
+# roles/calico/tasks/main.yaml
 # Installs Calico via the Tigera operator.
 # Runs from the init node (k3s211) only — kubectl applies are cluster-wide.
 
@@ -119,7 +119,7 @@
     # ── BGP configuration (disabled by default) ───────────────────
     # When you're ready to peer with OPNsense/FRR:
     #   1. Install FRR plugin on OPNsense
-    #   2. Set calico_bgp_enabled: true in group_vars/all.yml
+    #   2. Set calico_bgp_enabled: true in group_vars/all.yaml
     #   3. Re-run this role with --tags calico
     #   4. Configure BGPPeer resources pointing at OPNsense LAN IP
     #

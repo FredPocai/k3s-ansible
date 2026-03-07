@@ -1,5 +1,5 @@
 ---
-# roles/headlamp/tasks/main.yml
+# roles/headlamp/tasks/main.yaml
 # Installs Headlamp via Helm using a rendered values.yaml.
 # Registers headlamp.{{ base_domain }} in OPNsense Unbound for split-horizon DNS.
 #

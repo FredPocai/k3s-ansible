@@ -1,5 +1,5 @@
 ---
-# roles/opnsense-plugins/tasks/main.yml
+# roles/opnsense-plugins/tasks/main.yaml
 #
 # Installs OPNsense plugins required by downstream roles and removes stale
 # plugin references left over from restored firewall configs.
@@ -8,12 +8,14 @@
 #   os-haproxy     — load balancer / SNI router  (required by opnsense-haproxy)
 #   os-acme-client — ACME / Let's Encrypt        (required by opnsense-acme)
 #
+# Note: os-ddclient is NOT managed here. It is installed and configured by the
+# opnsense-ddclient role, which also handles its DynDNS account setup.
+#
 # Stale plugins suppressed (no-op if not installed):
 #   os-caddy       — replaced by HAProxy; suppress "missing plugin" GUI warning
-#   os-ddclient    — replaced by built-in Dynamic DNS; suppress GUI warning
 #
 # API notes:
-#   Detection:  GET  /api/core/firmware/packages   → {"rows": [...]}
+#   Detection:  GET  /api/core/firmware/info   → {"rows": [...]}
 #               /api/core/firmware/info returns product metadata, NOT package list
 #   Install:    POST /api/core/firmware/install/<name>  (per-package URL, OPNsense 24.x)
 #               The JSON-body variant {packages:[...]} does NOT work on 24.x
@@ -23,7 +25,7 @@
 
 - name: Get list of installed packages/plugins
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/core/firmware/packages"
+    url: "{{ opnsense_api_base }}/api/core/firmware/info"
     method: GET
     user: "{{ opnsense_api_key }}"
     password: "{{ opnsense_api_secret }}"
@@ -103,19 +105,3 @@
   ignore_errors: true
   tags: [opnsense, opnsense-plugins]
 
-- name: Remove stale os-ddclient plugin stub (suppress GUI warning)
-  ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/core/firmware/remove/os-ddclient"
-    method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
-    force_basic_auth: true
-    validate_certs: false
-    body: ""
-    status_code: [200]
-  delegate_to: localhost
-  when:
-    - opnsense_remove_stale_plugins | default(true)
-    - "'os-ddclient' not in _installed_pkg_names"
-  ignore_errors: true
-  tags: [opnsense, opnsense-plugins]

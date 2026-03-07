@@ -1,7 +1,7 @@
 ---
-# roles/prereqs/tasks/packages-dnf.yml
+# roles/prereqs/tasks/packages-dnf.yaml
 # Package installation for RedHat/Oracle Linux 9.
-# Called from main.yml when ansible_os_family == 'RedHat'.
+# Called from main.yaml when ansible_os_family == 'RedHat'.
 #
 # Package name differences vs Ubuntu:
 #   open-iscsi      → iscsi-initiator-utils

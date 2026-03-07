@@ -1,7 +1,7 @@
 ---
-# roles/prereqs/tasks/security-apparmor.yml
+# roles/prereqs/tasks/security-apparmor.yaml
 # AppArmor configuration for Debian/Ubuntu.
-# Called from main.yml when ansible_os_family == 'Debian'.
+# Called from main.yaml when ansible_os_family == 'Debian'.
 #
 # k3s and Longhorn work fine with AppArmor in complain/enforce mode as long as
 # the relevant profiles are loaded. Ubuntu 24.04 ships AppArmor enabled by

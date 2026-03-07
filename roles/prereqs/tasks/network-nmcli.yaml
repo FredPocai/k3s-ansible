@@ -1,7 +1,7 @@
 ---
-# roles/prereqs/tasks/network-nmcli.yml
+# roles/prereqs/tasks/network-nmcli.yaml
 # Static network configuration for RedHat/Oracle Linux 9 via NetworkManager.
-# Called from main.yml when ansible_os_family == 'RedHat'.
+# Called from main.yaml when ansible_os_family == 'RedHat'.
 #
 # OL9/RHEL9 use NetworkManager with nmcli — there is no netplan.
 # We configure both interfaces using the community.general.nmcli module.

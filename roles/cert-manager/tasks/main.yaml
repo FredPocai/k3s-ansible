@@ -1,5 +1,5 @@
 ---
-# roles/cert-manager/tasks/main.yml
+# roles/cert-manager/tasks/main.yaml
 #
 # Installs cert-manager and configures Cloudflare DNS-01 ACME for homelab.internal.
 #

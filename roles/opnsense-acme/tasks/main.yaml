@@ -8,19 +8,27 @@
 #
 # Requires:
 #   opnsense_api_key, opnsense_api_secret  — vault
-#   cloudflare_api_token                   — vault
+#   cloudflare_api_token                   — vault  (Restricted API Token)
+#   cloudflare_account_id                  — vault or group_vars
+#   cloudflare_zone_id                     — vault or group_vars (optional)
 #   acme_email                             — group_vars
 #   base_domain                            — group_vars
 #
-# Cloudflare field name note:
-#   The os-acme-client API uses dns_cf_token (NOT dns_cf_api_token).
-#   Confirmed from GET /api/acmeclient/validations/<uuid> response shape.
-#   dns_cf_email + dns_cf_key are the legacy Global API Key fields.
-#   dns_cf_token is the scoped API Token field — use this.
+# Cloudflare field mapping (confirmed from GET /api/acmeclient/validations/<uuid>):
+#   dns_cf_email      — Legacy Global API Key e-mail  (leave blank)
+#   dns_cf_key        — Legacy Global API Key          (leave blank)
+#   dns_cf_token      — Restricted API Token           <- USE THIS
+#   dns_cf_account_id — CF Account ID                  <- required with token
+#   dns_cf_zone_id    — CF Zone ID                     <- optional; acme.sh auto-detects
+#
+# NOTE: if the validation entry exists but has an empty dns_cf_token (because
+# it was created by a previous run that used the wrong field name), delete it
+# in the GUI (Services -> ACME Client -> Validation Methods) so this role can
+# recreate it correctly.
 #
 # Tags: opnsense, opnsense-acme
 
-# ── ACME Account ──────────────────────────────────────────────────
+# -- ACME Account --------------------------------------------------
 
 - name: Get existing ACME accounts
   ansible.builtin.uri:
@@ -58,13 +66,7 @@
     | list | length == 0
   tags: [opnsense, opnsense-acme]
 
-# ── Cloudflare DNS-01 validation ──────────────────────────────────
-# Field mapping (confirmed from GET response on existing validation):
-#   dns_cf_token      — Cloudflare scoped API Token  ← USE THIS
-#   dns_cf_email      — legacy Global API Key email  (leave blank)
-#   dns_cf_key        — legacy Global API Key        (leave blank)
-#   dns_cf_account_id — optional, not required for zone-scoped tokens
-#   dns_cf_zone_id    — optional, acme.sh auto-detects from token
+# -- Cloudflare DNS-01 validation ----------------------------------
 
 - name: Get existing ACME validation methods
   ansible.builtin.uri:
@@ -92,10 +94,12 @@
       validation:
         enabled: "1"
         name: "cloudflare-dns01"
-        description: "Cloudflare DNS-01 — managed by Ansible"
+        description: "Cloudflare DNS-01 (Restricted API Token) — managed by Ansible"
         method: "dns01"
         dns_service: "dns_cf"
         dns_cf_token: "{{ cloudflare_api_token }}"
+        dns_cf_account_id: "{{ cloudflare_account_id }}"
+        dns_cf_zone_id: "{{ cloudflare_zone_id | default('') }}"
     status_code: [200]
   delegate_to: localhost
   no_log: true
@@ -105,7 +109,7 @@
     | list | length == 0
   tags: [opnsense, opnsense-acme]
 
-# ── Resolve UUIDs ─────────────────────────────────────────────────
+# -- Resolve UUIDs -------------------------------------------------
 
 - name: Fetch fresh ACME accounts and validations (with UUIDs)
   ansible.builtin.uri:
@@ -139,7 +143,7 @@
       }}
   tags: [opnsense, opnsense-acme]
 
-# ── Certificate ───────────────────────────────────────────────────
+# -- Certificate ---------------------------------------------------
 
 - name: Get existing ACME certificates
   ansible.builtin.uri:
@@ -206,7 +210,7 @@
   ansible.builtin.fail:
     msg: >-
       ACME certificate 'fw.{{ base_domain }}' not found after creation attempt.
-      Check OPNsense GUI → Services → ACME Client → Certificates.
+      Check OPNsense GUI -> Services -> ACME Client -> Certificates.
   when: >-
     _acme_certs_final.json.rows
     | selectattr('name', 'equalto', 'fw.' + base_domain)
@@ -223,7 +227,7 @@
       }}
   tags: [opnsense, opnsense-acme]
 
-# ── Issue certificate ─────────────────────────────────────────────
+# -- Issue certificate ---------------------------------------------
 # Only triggered when the cert entry was freshly created this run.
 # On re-runs the cert entry already exists; os-acme handles auto-renewal.
 

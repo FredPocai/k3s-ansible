@@ -1,7 +1,7 @@
 ---
-# roles/prereqs/tasks/security-selinux.yml
+# roles/prereqs/tasks/security-selinux.yaml
 # SELinux configuration for RedHat/Oracle Linux 9.
-# Called from main.yml when ansible_os_family == 'RedHat'.
+# Called from main.yaml when ansible_os_family == 'RedHat'.
 #
 # k3s with Calico CNI requires SELinux to be set to permissive mode.
 # Enforcing mode will block:
