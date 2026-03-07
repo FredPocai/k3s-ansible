@@ -98,16 +98,45 @@
   roles:
     - headlamp
 
-# ── Phase 9: OPNsense — HAProxy, ACME, Unbound ───────────────────
-# Runs entirely from localhost (delegate_to: localhost).
-# Installs os-haproxy + os-acme, configures TLS passthrough for all
-# k3s_services + fw.{{ base_domain }}, registers Unbound entries.
-# Safe to re-run: all tasks are idempotent (check-before-create).
-- name: Configure OPNsense HAProxy, ACME, and Unbound
+# ── Phase 9: OPNsense — plugin install ───────────────────────────
+# Installs os-haproxy and os-acme-client; removes stale plugin stubs.
+# Safe to re-run.
+- name: Install OPNsense plugins (os-haproxy, os-acme-client)
   hosts: k3s_init
+  become: false
   gather_facts: false
   tags: [opnsense]
+  tags: [opnsense, opnsense-plugins]
   vars_files:
     - vault/secrets.yml
   roles:
     - opnsense
+    - opnsense-plugins
+
+# ── Phase 10: OPNsense — ACME / Let's Encrypt ────────────────────
+# Configures os-acme-client: account, Cloudflare DNS-01, fw cert.
+# Safe to re-run (check-before-create throughout).
+- name: Configure OPNsense ACME / Let's Encrypt
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, opnsense-acme]
+  vars_files:
+    - vault/secrets.yml
+  roles:
+    - opnsense-acme
+
+# ── Phase 11: OPNsense — HAProxy ──────────────────────────────────
+# Configures HAProxy: servers, backends, ACLs, actions, frontends.
+# Depends on acme_cert_uuid set by opnsense-acme (or falls back to
+# cert manager lookup when run standalone).
+# Safe to re-run (check-before-create throughout).
+- name: Configure OPNsense HAProxy
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, opnsense-haproxy]
+  vars_files:
+    - vault/secrets.yml
+  roles:
+    - opnsense-haproxy
