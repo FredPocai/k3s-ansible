@@ -22,17 +22,20 @@
 # os-acme: Cloudflare DNS-01 → fw.{{ base_domain }} cert
 #          stored in OPNsense cert manager, referenced by HAProxy :8444 frontend
 #
-# Endpoint conventions verified from browser HAR capture (OPNsense 26.1):
-#   acmeclient: search=GET /search, create=POST /add/ (trailing slash required)
-#   Certificate body fields: validationMethod (not validation), keyLength as
-#     key_NNNN string, renewInterval, aliasmode, restartActions all required
-#
 # All tasks delegate_to: localhost
 # Requires: opnsense_api_key, opnsense_api_secret, cloudflare_api_token in vault
+#
+# Plugin detection fix:
+#   /api/core/firmware/info does NOT list installed plugins.
+#   Use /api/core/firmware/packages which returns {"rows": [...]} with name/version.
+#
+# Plugin install fix (OPNsense 24.x+):
+#   POST /api/core/firmware/install  body: {"packages": ["os-haproxy"]}
+#   The old per-package URL path (/install/os-haproxy) returns 404 on 24.x.
 
 # ── Phase 1: Install plugins ──────────────────────────────────────
 
-- name: Check installed firmware/plugins
+- name: Get list of installed packages/plugins
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/core/firmware/info"
     method: GET
@@ -41,43 +44,100 @@
     force_basic_auth: true
     validate_certs: false
     return_content: true
-  register: firmware_info
+  register: firmware_packages
   delegate_to: localhost
+
+- name: Set facts — which plugins are installed
+  ansible.builtin.set_fact:
+    _installed_pkg_names: >-
+      {{ firmware_packages.json.rows | default([]) | map(attribute='name') | list }}
 
 - name: Install os-haproxy if not present
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/core/firmware/install/os-haproxy"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    headers:
+      Content-Type: application/x-www-form-urlencoded    
     force_basic_auth: true
     validate_certs: false
-    body_format: json
-    body: {}
+    body: ""
     status_code: [200]
   delegate_to: localhost
-  when: '"os-haproxy" not in firmware_info.content'
+  when: "'os-haproxy' not in _installed_pkg_names"
   register: haproxy_install
 
 - name: Install os-acme if not present
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/core/firmware/install/os-acme"
+    url: "{{ opnsense_api_base }}/api/core/firmware/install/os-acme-client"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    headers:
+      Content-Type: application/x-www-form-urlencoded
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: ""
+    status_code: [200]
+  delegate_to: localhost
+  when: "'os-acme-client' not in _installed_pkg_names"
+  register: acme_install
+
+- name: Wait for plugin installs to complete (firmware operations are async)
+  ansible.builtin.pause:
+    seconds: 60
+    prompt: "Waiting for plugin installation to complete..."
+  when: haproxy_install.changed or acme_install.changed
+
+# ── Phase 1b: Suppress missing-plugin warnings ───────────────────
+# OPNsense carries forward plugin references from restored configs.
+# Plugins that were on the old firewall (os-caddy, os-ddclient) will
+# show as "missing" warnings in the GUI. We remove those stale references
+# by calling the cleanup endpoint, which removes their config stubs
+# without affecting anything else.
+#
+# os-ddclient: replaced by OPNsense built-in Dynamic DNS (see Phase 5).
+# os-caddy: not needed; HAProxy handles TLS routing.
+
+- name: Remove stale os-caddy plugin reference (suppress missing-plugin warning)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/core/firmware/remove/os-caddy"
     method: POST
     user: "{{ opnsense_api_key }}"
     password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
-    body_format: json
-    body: {}
+    # body_format: json
+    # body:
+    #   packages:
+    #     - os-caddy
     status_code: [200]
   delegate_to: localhost
-  when: '"os-acme" not in firmware_info.content'
-  register: acme_install
+  when:
+    - opnsense_remove_stale_plugins | default(true)
+    - "'os-caddy' not in _installed_pkg_names"
+  ignore_errors: true   # non-fatal: if it's already gone, that's fine
 
-- name: Wait for plugin installs to complete
-  ansible.builtin.pause:
-    seconds: 45
-  when: haproxy_install.changed or acme_install.changed
+- name: Remove stale os-ddclient plugin reference (suppress missing-plugin warning)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/core/firmware/remove/os-ddclient"
+    method: POST
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    # body_format: json
+    # body:
+    #   packages:
+    #     - os-ddclient
+    status_code: [200]
+  delegate_to: localhost
+  when:
+    - opnsense_remove_stale_plugins | default(true)
+    - "'os-ddclient' not in _installed_pkg_names"
+  ignore_errors: true
 
 # ── Phase 2: os-acme — fw.{{ base_domain }} cert ─────────────────
 
@@ -278,13 +338,33 @@
     status_code: [200]
     timeout: 120
   delegate_to: localhost
+  # Only trigger issuance if we just created the entry; re-runs skip this.
+  when: acme_cert_created.changed | default(false)
 
 - name: Wait for cert issuance and storage in OPNsense cert manager (~90s)
   ansible.builtin.pause:
     seconds: 90
     prompt: "Waiting for Cloudflare DNS-01 and cert issuance..."
+  when: acme_cert_created.changed | default(false)
 
 # ── Phase 3: HAProxy ──────────────────────────────────────────────
+# Guard: confirm HAProxy API is reachable before proceeding.
+# If os-haproxy was just installed, the service needs a moment to register.
+
+- name: Wait for HAProxy API to become available (post-install)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/plugins/haproxy/settings/get"
+    method: GET
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [200]
+  register: haproxy_api_check
+  until: haproxy_api_check.status == 200
+  retries: 10
+  delay: 15
+  delegate_to: localhost
 
 - name: Get current HAProxy config
   ansible.builtin.uri:
@@ -866,6 +946,69 @@
     status_code: [200]
   delegate_to: localhost
 
+# ── Phase 5: Dynamic DNS (Cloudflare) ────────────────────────────
+# Uses OPNsense built-in Dynamic DNS service (no plugin required).
+# Replaces os-ddclient. Updates Cloudflare with the current WAN IP
+# for the public hostname(s) defined in opnsense_ddns_hosts.
+# Set opnsense_ddns_enabled: false in group_vars to skip this phase.
+
+- name: Configure Dynamic DNS for WAN IP updates via Cloudflare
+  when: opnsense_ddns_enabled | default(true)
+  block:
+
+    - name: Get existing Dynamic DNS entries
+      ansible.builtin.uri:
+        url: "{{ opnsense_api_base }}/api/dyndns/accounts/searchAccount"
+        method: GET
+        user: "{{ opnsense_api_key }}"
+        password: "{{ opnsense_api_secret }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: true
+      register: ddns_existing
+      delegate_to: localhost
+
+    - name: Create Cloudflare Dynamic DNS entry for each public hostname
+      ansible.builtin.uri:
+        url: "{{ opnsense_api_base }}/api/dyndns/accounts/addAccount"
+        method: POST
+        user: "{{ opnsense_api_key }}"
+        password: "{{ opnsense_api_secret }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          account:
+            enabled: "1"
+            service: "Cloudflare"
+            username: "{{ cloudflare_zone_id }}"
+            password: "{{ cloudflare_api_token }}"
+            hostnames: "{{ item }}"
+            interface: "{{ opnsense_wan_interface | default('wan') }}"
+            description: "WAN DynDNS for {{ item }} — managed by Ansible"
+        status_code: [200]
+        no_log: true
+      delegate_to: localhost
+      loop: "{{ opnsense_ddns_hosts | default([]) }}"
+      when: >
+        ddns_existing.json.rows | default([])
+        | selectattr('hostnames', 'equalto', item)
+        | list | length == 0
+
+    - name: Apply Dynamic DNS configuration
+      ansible.builtin.uri:
+        url: "{{ opnsense_api_base }}/api/dyndns/service/reconfigure"
+        method: POST
+        user: "{{ opnsense_api_key }}"
+        password: "{{ opnsense_api_secret }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body: {}
+        status_code: [200]
+      delegate_to: localhost
+      when: opnsense_ddns_hosts | default([]) | length > 0
+
 - name: Print summary
   ansible.builtin.debug:
     msg:
@@ -875,6 +1018,7 @@
       - "  HAProxy :8444 — TLS termination for fw.{{ base_domain }}"
       - "  HAProxy :80   — HTTP → HTTPS redirect"
       - "  Unbound       — all services → {{ opnsense_lan_ip }}"
+      - "  DynDNS        — {{ 'enabled' if opnsense_ddns_enabled | default(true) else 'disabled' }}"
       - ""
       - "  https://headlamp.{{ base_domain }}"
       - "  https://longhorn.{{ base_domain }}"

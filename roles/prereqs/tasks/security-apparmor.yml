@@ -1,0 +1,33 @@
+---
+# roles/prereqs/tasks/security-apparmor.yml
+# AppArmor configuration for Debian/Ubuntu.
+# Called from main.yml when ansible_os_family == 'Debian'.
+#
+# k3s and Longhorn work fine with AppArmor in complain/enforce mode as long as
+# the relevant profiles are loaded. Ubuntu 24.04 ships AppArmor enabled by
+# default. No changes are needed for k3s core operation, but we ensure the
+# service is running so containerd can use it.
+
+- name: Ensure AppArmor is installed
+  ansible.builtin.apt:
+    name:
+      - apparmor
+      - apparmor-utils
+    state: present
+
+- name: Ensure AppArmor service is enabled and running
+  ansible.builtin.systemd:
+    name: apparmor
+    enabled: true
+    state: started
+
+- name: Check AppArmor status
+  ansible.builtin.command: aa-status --json
+  register: aa_status
+  changed_when: false
+  failed_when: false
+
+- name: Report AppArmor mode
+  ansible.builtin.debug:
+    msg: "AppArmor is active. Loaded profiles: {{ (aa_status.stdout | from_json).profiles | default({}) | length }}"
+  when: aa_status.rc == 0
