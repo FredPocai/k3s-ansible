@@ -353,7 +353,7 @@
 
 - name: Wait for HAProxy API to become available (post-install)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/plugins/haproxy/settings/get"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
     method: GET
     user: "{{ opnsense_api_key }}"
     password: "{{ opnsense_api_secret }}"
@@ -404,7 +404,7 @@
   delegate_to: localhost
   loop: "{{ k3s_nodes }}"
   when: >
-    item.name not in (haproxy_config.json.haproxy.servers
+    item.name not in (haproxy_config.json.haproxy.servers.server
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Create HAProxy server entry for OPNsense GUI (HTTP :8080)
@@ -429,7 +429,7 @@
     status_code: [200]
   delegate_to: localhost
   when: >
-    'opnsense-gui' not in (haproxy_config.json.haproxy.servers
+    'opnsense-gui' not in (haproxy_config.json.haproxy.servers.server
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Create HAProxy server for fw SSL-termination loopback (:8444)
@@ -454,7 +454,7 @@
     status_code: [200]
   delegate_to: localhost
   when: >
-    'fw-ssl-loopback' not in (haproxy_config.json.haproxy.servers
+    'fw-ssl-loopback' not in (haproxy_config.json.haproxy.servers.server
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Get HAProxy config with server UUIDs
@@ -473,19 +473,19 @@
   ansible.builtin.set_fact:
     k3s_server_uuids: >-
       {{
-        haproxy_with_servers.json.haproxy.servers | default({}) | dict2items
+        haproxy_with_servers.json.haproxy.servers.server | default({}) | dict2items
         | selectattr('value.name', 'in', k3s_nodes | map(attribute='name') | list)
         | map(attribute='key') | list | join(',')
       }}
     opnsense_server_uuid: >-
       {{
-        haproxy_with_servers.json.haproxy.servers | default({}) | dict2items
+        haproxy_with_servers.json.haproxy.servers.server | default({}) | dict2items
         | selectattr('value.name', 'equalto', 'opnsense-gui')
         | map(attribute='key') | first
       }}
     fw_loopback_server_uuid: >-
       {{
-        haproxy_with_servers.json.haproxy.servers | default({}) | dict2items
+        haproxy_with_servers.json.haproxy.servers.server | default({}) | dict2items
         | selectattr('value.name', 'equalto', 'fw-ssl-loopback')
         | map(attribute='key') | first
       }}
@@ -512,7 +512,7 @@
     status_code: [200]
   delegate_to: localhost
   when: >
-    'k3s-ingress' not in (haproxy_with_servers.json.haproxy.backends
+    'k3s-ingress' not in (haproxy_with_servers.json.haproxy.backends.backend
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Create opnsense-gui backend (HTTP mode)
@@ -535,7 +535,7 @@
     status_code: [200]
   delegate_to: localhost
   when: >
-    'opnsense-gui' not in (haproxy_with_servers.json.haproxy.backends
+    'opnsense-gui' not in (haproxy_with_servers.json.haproxy.backends.backend
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Create fw-ssl-loopback backend (TCP mode)
@@ -558,7 +558,7 @@
     status_code: [200]
   delegate_to: localhost
   when: >
-    'fw-ssl-loopback' not in (haproxy_with_servers.json.haproxy.backends
+    'fw-ssl-loopback' not in (haproxy_with_servers.json.haproxy.backends.backend
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Get HAProxy config with backend UUIDs
@@ -577,19 +577,19 @@
   ansible.builtin.set_fact:
     k3s_backend_uuid: >-
       {{
-        haproxy_with_backends.json.haproxy.backends | default({}) | dict2items
+        haproxy_with_backends.json.haproxy.backends.backend | default({}) | dict2items
         | selectattr('value.name', 'equalto', 'k3s-ingress')
         | map(attribute='key') | first
       }}
     opnsense_backend_uuid: >-
       {{
-        haproxy_with_backends.json.haproxy.backends | default({}) | dict2items
+        haproxy_with_backends.json.haproxy.backends.backend | default({}) | dict2items
         | selectattr('value.name', 'equalto', 'opnsense-gui')
         | map(attribute='key') | first
       }}
     fw_loopback_backend_uuid: >-
       {{
-        haproxy_with_backends.json.haproxy.backends | default({}) | dict2items
+        haproxy_with_backends.json.haproxy.backends.backend | default({}) | dict2items
         | selectattr('value.name', 'equalto', 'fw-ssl-loopback')
         | map(attribute='key') | first
       }}
@@ -616,7 +616,7 @@
   delegate_to: localhost
   loop: "{{ k3s_services }}"
   when: >
-    'sni_' + item.name not in (haproxy_with_backends.json.haproxy.acls
+    'sni_' + item.name not in (haproxy_with_backends.json.haproxy.acls.acl
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Create SNI ACL for fw.{{ base_domain }}
@@ -638,7 +638,7 @@
     status_code: [200]
   delegate_to: localhost
   when: >
-    'sni_fw' not in (haproxy_with_backends.json.haproxy.acls
+    'sni_fw' not in (haproxy_with_backends.json.haproxy.acls.acl
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Get HAProxy config with ACL UUIDs
@@ -672,7 +672,7 @@
         backend: "{{ k3s_backend_uuid }}"
         acl: >-
           {{
-            haproxy_with_acls.json.haproxy.acls | default({}) | dict2items
+            haproxy_with_acls.json.haproxy.acls.acl | default({}) | dict2items
             | selectattr('value.name', 'equalto', 'sni_' + item.name)
             | map(attribute='key') | first
           }}
@@ -681,7 +681,7 @@
   delegate_to: localhost
   loop: "{{ k3s_services }}"
   when: >
-    'route_' + item.name not in (haproxy_with_acls.json.haproxy.actions
+    'route_' + item.name not in (haproxy_with_acls.json.haproxy.actions.action
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Create use-backend action for fw (→ loopback :8444)
@@ -701,7 +701,7 @@
         backend: "{{ fw_loopback_backend_uuid }}"
         acl: >-
           {{
-            haproxy_with_acls.json.haproxy.acls | default({}) | dict2items
+            haproxy_with_acls.json.haproxy.acls.acl | default({}) | dict2items
             | selectattr('value.name', 'equalto', 'sni_fw')
             | map(attribute='key') | first
           }}
@@ -709,7 +709,7 @@
     status_code: [200]
   delegate_to: localhost
   when: >
-    'route_fw' not in (haproxy_with_acls.json.haproxy.actions
+    'route_fw' not in (haproxy_with_acls.json.haproxy.actions.action
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Get HAProxy config with action UUIDs
@@ -728,7 +728,7 @@
   ansible.builtin.set_fact:
     frontend_action_uuids: >-
       {{
-        haproxy_with_actions.json.haproxy.actions | default({}) | dict2items
+        haproxy_with_actions.json.haproxy.actions.action | default({}) | dict2items
         | selectattr('value.name', 'match', '^route_')
         | map(attribute='key') | list | join(',')
       }}
@@ -758,7 +758,7 @@
     status_code: [200]
   delegate_to: localhost
   when: >
-    'k3s-https' not in (haproxy_with_actions.json.haproxy.frontends
+    'k3s-https' not in (haproxy_with_actions.json.haproxy.frontends.frontend
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Get fw.{{ base_domain }} cert UUID from OPNsense cert manager
@@ -806,7 +806,7 @@
   delegate_to: localhost
   when: >
     fw_cert_uuid != '' and
-    'fw-https' not in (haproxy_with_actions.json.haproxy.frontends
+    'fw-https' not in (haproxy_with_actions.json.haproxy.frontends.frontend
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Warn if fw cert not yet available in cert manager
@@ -839,7 +839,7 @@
     status_code: [200]
   delegate_to: localhost
   when: >
-    'http-redirect' not in (haproxy_with_actions.json.haproxy.frontends
+    'http-redirect' not in (haproxy_with_actions.json.haproxy.frontends.frontend
     | default({}) | dict2items | map(attribute='value.name') | list)
 
 - name: Enable HAProxy
