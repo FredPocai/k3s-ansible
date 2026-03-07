@@ -1,0 +1,33 @@
+---
+# roles/opnsense-register-service/defaults/main.yaml
+#
+# Called with a 'service' dict variable, e.g.:
+#
+#   ansible-playbook site.yaml --tags register-service \
+#     -e '{"service": {"name": "myapp", "hostname": "myapp.pocai.net", "public": false}}'
+#
+# Or from another role/play:
+#   - ansible.builtin.include_role:
+#       name: opnsense-register-service
+#     vars:
+#       service:
+#         name: myapp
+#         hostname: myapp.pocai.net
+#         public: false            # true = add NAT portforward + firewall rule + ddclient CF record
+#         backend_ip: "{{ opnsense_lan_ip }}"   # defaults to HAProxy VIP (opnsense_lan_ip)
+#         backend_port: 443        # port HAProxy listens on (default 443)
+#         acme_cert: true          # request a Let's Encrypt cert via os-acme (default true)
+#
+# Service dict fields:
+#   name        (required) short identifier, used for HAProxy object names
+#   hostname    (required) FQDN, used for SNI ACL, Unbound, ACME cert
+#   public      (optional, default false) if true: CF A record + NAT portforward + FW rule
+#   backend_ip  (optional, default opnsense_lan_ip) HAProxy backend target
+#   backend_port (optional, default 443)
+#   acme_cert   (optional, default true) create ACME cert entry and issue
+
+# HAProxy public-facing port for inbound NAT (WAN -> HAProxy :443)
+opnsense_public_port: 443
+
+# WAN interface name for NAT rule
+opnsense_wan_interface: "wan"

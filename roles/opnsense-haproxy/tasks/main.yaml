@@ -4,31 +4,18 @@
 # Configures HAProxy on OPNsense via the os-haproxy plugin API.
 #
 # Architecture:
-#   :443  TCP frontend  — SNI inspection → k3s passthrough + fw loopback
+#   :443  TCP frontend  — SNI inspection -> k3s passthrough + fw loopback
 #   :8444 HTTPS frontend — TLS termination for fw.{{ base_domain }}
 #   :80   HTTP frontend  — redirect to HTTPS
 #
-# Requires:
-#   opnsense_api_key, opnsense_api_secret  — vault
-#   base_domain, k3s_nodes, k3s_services   — group_vars
-#   opnsense_lan_ip                        — group_vars
-#   acme_cert_uuid                         — set by opnsense-acme, or looked
-#                                            up from cert manager below
-#
-# The refresh+normalize step (settings/get + set_fact) is extracted to
-# tasks/refresh-normalize.yaml and called via include_tasks rather than
-# repeating 12 lines after every mutating API call.
-#
 # Tags: opnsense, opnsense-haproxy
-
-# ── Wait for API ──────────────────────────────────────────────────
 
 - name: Wait for HAProxy API to become available
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
     method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     status_code: [200]
@@ -43,16 +30,16 @@
   ansible.builtin.include_tasks: refresh-normalize.yaml
   tags: [opnsense, opnsense-haproxy]
 
-# ═══════════════════════════════════════════════════════════════════
+# =================================================================
 # SERVERS
-# ═══════════════════════════════════════════════════════════════════
+# =================================================================
 
 - name: Create HAProxy server entries for k3s nodes
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_server"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addServer"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -75,10 +62,10 @@
 
 - name: Create HAProxy server entry for OPNsense GUI (:8080 HTTP)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_server"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addServer"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -99,10 +86,10 @@
 
 - name: Create HAProxy server entry for fw SSL-loopback (:8444)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_server"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addServer"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -147,16 +134,16 @@
       }}
   tags: [opnsense, opnsense-haproxy]
 
-# ═══════════════════════════════════════════════════════════════════
+# =================================================================
 # BACKENDS
-# ═══════════════════════════════════════════════════════════════════
+# =================================================================
 
 - name: Create k3s-ingress backend (TCP, round-robin)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_backend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addBackend"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -175,10 +162,10 @@
 
 - name: Create opnsense-gui backend (HTTP)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_backend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addBackend"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -197,10 +184,10 @@
 
 - name: Create fw-ssl-loopback backend (TCP)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_backend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addBackend"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -243,16 +230,16 @@
       }}
   tags: [opnsense, opnsense-haproxy]
 
-# ═══════════════════════════════════════════════════════════════════
-# ACLs (SNI matching)
-# ═══════════════════════════════════════════════════════════════════
+# =================================================================
+# ACLs
+# =================================================================
 
 - name: Create SNI ACL for each k3s service
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_acl"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addAcl"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -273,10 +260,10 @@
 
 - name: Create SNI ACL for fw.{{ base_domain }}
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_acl"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addAcl"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -296,16 +283,16 @@
   ansible.builtin.include_tasks: refresh-normalize.yaml
   tags: [opnsense, opnsense-haproxy]
 
-# ═══════════════════════════════════════════════════════════════════
-# ACTIONS (use-backend rules)
-# ═══════════════════════════════════════════════════════════════════
+# =================================================================
+# ACTIONS
+# =================================================================
 
 - name: Create use-backend action for each k3s service
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_action"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addAction"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -321,7 +308,7 @@
             | selectattr('value.name', 'equalto', 'sni_' + item.name)
             | map(attribute='key') | first
           }}
-        description: "Route {{ item.hostname }} → k3s — managed by Ansible"
+        description: "Route {{ item.hostname }} -> k3s — managed by Ansible"
     status_code: [200]
   delegate_to: localhost
   loop: "{{ k3s_services }}"
@@ -330,12 +317,12 @@
     (_hp_actions | dict2items | map(attribute='value.name') | list)
   tags: [opnsense, opnsense-haproxy]
 
-- name: Create use-backend action for fw → loopback :8444
+- name: Create use-backend action for fw -> loopback :8444
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_action"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addAction"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -351,7 +338,7 @@
             | selectattr('value.name', 'equalto', 'sni_fw')
             | map(attribute='key') | first
           }}
-        description: "Route fw.{{ base_domain }} → fw HTTPS frontend — managed by Ansible"
+        description: "Route fw.{{ base_domain }} -> fw HTTPS frontend — managed by Ansible"
     status_code: [200]
   delegate_to: localhost
   when: "'route_fw' not in (_hp_actions | dict2items | map(attribute='value.name') | list)"
@@ -371,16 +358,16 @@
       }}
   tags: [opnsense, opnsense-haproxy]
 
-# ═══════════════════════════════════════════════════════════════════
+# =================================================================
 # FRONTENDS
-# ═══════════════════════════════════════════════════════════════════
+# =================================================================
 
 - name: Create :443 TCP/SNI passthrough frontend
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_frontend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addFrontend"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -400,15 +387,12 @@
   when: "'k3s-https' not in (_hp_frontends | dict2items | map(attribute='value.name') | list)"
   tags: [opnsense, opnsense-haproxy]
 
-# Locate the fw cert in OPNsense's cert manager.
-# acme_cert_uuid is set by opnsense-acme; if running this role standalone,
-# fall back to a cert manager search.
-- name: Look up fw.{{ base_domain }} cert in OPNsense cert manager
+- name: Look up fw.{{ base_domain }} cert in OPNsense cert manager (standalone mode)
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/trust/cert/search"
     method: GET
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     return_content: true
@@ -431,10 +415,10 @@
 
 - name: Create :8444 HTTPS frontend (TLS termination for fw.{{ base_domain }})
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_frontend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addFrontend"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -447,7 +431,7 @@
         ssl_enabled: "1"
         ssl_certificates: "{{ acme_cert_uuid }}"
         defaultBackend: "{{ _opnsense_backend_uuid }}"
-        description: "fw.{{ base_domain }} TLS termination → OPNsense :8080 — managed by Ansible"
+        description: "fw.{{ base_domain }} TLS termination -> OPNsense :8080 — managed by Ansible"
     status_code: [200]
   delegate_to: localhost
   when:
@@ -455,21 +439,21 @@
     - "'fw-https' not in (_hp_frontends | dict2items | map(attribute='value.name') | list)"
   tags: [opnsense, opnsense-haproxy]
 
-- name: Warn if fw cert is not yet available in cert manager
+- name: Warn if fw cert is not yet available
   ansible.builtin.debug:
     msg: >-
-      WARNING: fw.{{ base_domain }} cert not yet visible in OPNsense cert manager.
-      The :8444 frontend was skipped. Re-run with --tags opnsense-haproxy after
-      the cert appears in Services → ACME Client → Certificates with a valid status.
+      WARNING: fw.{{ base_domain }} cert not yet in OPNsense cert manager.
+      The :8444 frontend was skipped. Re-run --tags opnsense-haproxy after
+      the cert appears in Services -> ACME Client -> Certificates.
   when: acme_cert_uuid | default('') == ''
   tags: [opnsense, opnsense-haproxy]
 
 - name: Create :80 HTTP redirect frontend
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_frontend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/addFrontend"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -482,22 +466,22 @@
         ssl_enabled: "0"
         defaultBackend: ""
         customOptions: "redirect scheme https code 301"
-        description: "HTTP → HTTPS redirect — managed by Ansible"
+        description: "HTTP -> HTTPS redirect — managed by Ansible"
     status_code: [200]
   delegate_to: localhost
   when: "'http-redirect' not in (_hp_frontends | dict2items | map(attribute='value.name') | list)"
   tags: [opnsense, opnsense-haproxy]
 
-# ═══════════════════════════════════════════════════════════════════
-# ENABLE and APPLY
-# ═══════════════════════════════════════════════════════════════════
+# =================================================================
+# ENABLE AND APPLY
+# =================================================================
 
 - name: Enable HAProxy service
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/haproxy/maintenance/set"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -512,8 +496,8 @@
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/haproxy/service/reconfigure"
     method: POST
-    user: "{{ opnsense_api_key }}"
-    password: "{{ opnsense_api_secret }}"
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
     force_basic_auth: true
     validate_certs: false
     body_format: json
@@ -525,8 +509,8 @@
 - name: Print HAProxy configuration summary
   ansible.builtin.debug:
     msg:
-      - "HAProxy configured successfully:"
+      - "HAProxy configured:"
       - "  :443  — SNI passthrough (k3s) + fw loopback"
       - "  :8444 — TLS termination for fw.{{ base_domain }}"
-      - "  :80   — HTTP → HTTPS redirect"
+      - "  :80   — HTTP -> HTTPS redirect"
   tags: [opnsense, opnsense-haproxy]

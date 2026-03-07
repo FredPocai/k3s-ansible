@@ -4,12 +4,16 @@
 # Usage:
 #   Full deploy:        ansible-playbook -i inventory/hosts.yaml site.yaml --ask-vault-pass
 #   Single tag:         ansible-playbook -i inventory/hosts.yaml site.yaml --tags <tag> --ask-vault-pass
+#   Register service:   ansible-playbook -i inventory/hosts.yaml site.yaml --tags register-service \
+#                         -e '{"service":{"name":"myapp","hostname":"myapp.example.com","public":false}}'
 #
-# Tags: prereqs, k3s, calico, cert-manager, longhorn, ingress, dashboard
+# Tags:
+#   prereqs, k3s, calico, cert-manager, longhorn, ingress, dashboard
+#   opnsense, opnsense-plugins, opnsense-acme, opnsense-haproxy, opnsense-ddclient
+#   register-service
 #
-# Vault: copy vault/secrets.example.yaml → vault/secrets.yaml, fill in values, then encrypt. cloudflare_api_token, opnsense_api_key,
-#        opnsense_api_secret. Encrypt before committing:
-#          ansible-vault encrypt vault/secrets.yaml
+# Vault: copy vault/secrets.example.yaml -> vault/secrets.yaml, fill in values, then encrypt:
+#   ansible-vault encrypt vault/secrets.yaml
 
 # Load vault secrets into all plays
 - name: Load vault secrets
@@ -31,7 +35,7 @@
     - prereqs
 
 # ── Phase 2: Bootstrap init node ──────────────────────────────────
-- name: Bootstrap k3s init node (k3s211)
+- name: Bootstrap k3s init node
   hosts: k3s_init
   become: true
   gather_facts: false
@@ -40,7 +44,7 @@
     - k3s-server
 
 # ── Phase 3: Join remaining nodes ─────────────────────────────────
-- name: Join k3s nodes to cluster (k3s212, k3s213)
+- name: Join k3s nodes to cluster
   hosts: k3s_join
   become: true
   gather_facts: false
@@ -105,12 +109,10 @@
   hosts: k3s_init
   become: false
   gather_facts: false
-  tags: [opnsense]
   tags: [opnsense, opnsense-plugins]
   vars_files:
     - vault/secrets.yaml
   roles:
-    # - opnsense
     - opnsense-plugins
 
 # ── Phase 10: OPNsense — ACME / Let's Encrypt ────────────────────
@@ -126,10 +128,10 @@
   roles:
     - opnsense-acme
 
-# ── Phase 11: OPNsense — HAProxy ──────────────────────────────────
+# ── Phase 11: OPNsense — HAProxy ─────────────────────────────────
 # Configures HAProxy: servers, backends, ACLs, actions, frontends.
-# Depends on acme_cert_uuid set by opnsense-acme (or falls back to
-# cert manager lookup when run standalone).
+# Depends on acme_cert_uuid set by opnsense-acme, or looks it up
+# from the cert manager when run standalone.
 # Safe to re-run (check-before-create throughout).
 - name: Configure OPNsense HAProxy
   hosts: k3s_init
@@ -141,8 +143,7 @@
   roles:
     - opnsense-haproxy
 
-
-# -- Phase 12: OPNsense -- ddclient (Dynamic DNS) ------------------
+# ── Phase 12: OPNsense — ddclient (Dynamic DNS) ──────────────────
 # Installs os-ddclient and configures Cloudflare DynDNS for WAN IP updates.
 # Only runs when opnsense_ddns_hosts is non-empty.
 # Skip entirely with: --skip-tags opnsense-ddclient
@@ -156,3 +157,29 @@
   roles:
     - role: opnsense-ddclient
       when: opnsense_ddns_hosts | default([]) | length > 0
+
+# ── Phase 13: OPNsense — register-service ────────────────────────
+# Registers a single service into the OPNsense stack on demand.
+# Not run during a full deploy; invoke explicitly with --tags register-service
+# and pass a 'service' dict via -e.
+#
+# Examples:
+#   # Internal-only service (Unbound + HAProxy SNI + ACME cert):
+#   ansible-playbook -i inventory/hosts.yaml site.yaml \
+#     --tags register-service --ask-vault-pass \
+#     -e '{"service":{"name":"grafana","hostname":"grafana.example.com"}}'
+#
+#   # Public service (above + Cloudflare A record + NAT portforward):
+#   ansible-playbook -i inventory/hosts.yaml site.yaml \
+#     --tags register-service --ask-vault-pass \
+#     -e '{"service":{"name":"grafana","hostname":"grafana.example.com","public":true}}'
+- name: Register a service in OPNsense (on-demand)
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [register-service]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - role: opnsense-register-service
+      when: service is defined
