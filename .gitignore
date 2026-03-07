@@ -15,3 +15,4 @@ group_vars/*.yaml
 inventory/*.yaml
 inventory/*.yml
 roles/files/htpasswd
+*.patch
