@@ -1,0 +1,59 @@
+# roles/authentik/templates/redis.yaml.j2
+# Standalone Redis for Authentik task queuing and caching.
+# Single instance — Redis data is ephemeral/reconstructable; no HA needed.
+# Longhorn StorageClass is fine here (replicated, no write-latency concern).
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: authentik-redis
+  namespace: {{ authentik_namespace }}
+  labels:
+    app: authentik-redis
+spec:
+  serviceName: authentik-redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authentik-redis
+  template:
+    metadata:
+      labels:
+        app: authentik-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command: ["redis-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ authentik_redis_storage_class }}
+        resources:
+          requests:
+            storage: {{ authentik_redis_size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authentik-redis-master
+  namespace: {{ authentik_namespace }}
+spec:
+  selector:
+    app: authentik-redis
+  ports:
+    - port: 6379
+      targetPort: 6379

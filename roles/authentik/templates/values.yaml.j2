@@ -1,0 +1,64 @@
+# roles/authentik/templates/values.yaml.j2
+# Authentik Helm values — rendered by Ansible
+
+authentik:
+  secret_key: "{{ authentik_secret_key }}"
+  log_level: info
+
+  # Bootstrap creates the initial admin akadmin user on first run.
+  # Change the password via the UI after first login.
+  bootstrap_email: "{{ authentik_bootstrap_email }}"
+  bootstrap_password: "{{ authentik_bootstrap_password }}"
+
+  postgresql:
+    host: "{{ authentik_pg_cluster_name }}-rw.{{ authentik_namespace }}.svc.cluster.local"
+    name: "{{ authentik_pg_db }}"
+    user: "{{ authentik_pg_owner }}"
+    password: "{{ authentik_pg_password }}"
+
+  redis:
+    host: "authentik-redis-master.{{ authentik_namespace }}.svc.cluster.local"
+
+server:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-production
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+      # Required for authentik's websocket-based flow executor
+      nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    hosts:
+      - host: "{{ authentik_hostname }}"
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - hosts:
+          - "{{ authentik_hostname }}"
+        secretName: authentik-tls
+
+  # Resources — conservative for homelab (4c/24GB nodes)
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+worker:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# Disable bundled PostgreSQL and Redis — we deploy them separately
+# for proper lifecycle management (CNPG for PG, standalone for Redis)
+postgresql:
+  enabled: false
+
+redis:
+  enabled: false

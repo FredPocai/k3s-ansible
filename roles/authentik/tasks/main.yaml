@@ -1,0 +1,182 @@
+---
+# roles/authentik/tasks/main.yaml
+#
+# Deploys Authentik IdP on k3s with:
+#   - CNPG PostgreSQL cluster (local-path SC, 3 instances, WAL replication)
+#   - Standalone Redis StatefulSet (Longhorn SC, single instance)
+#   - Authentik server + worker via Helm (bundled PG/Redis disabled)
+#   - Ingress at idp.{{ base_domain }} via ingress-nginx + cert-manager
+#   - OPNsense registration via opnsense-register-service (Unbound + HAProxy SNI + ACME)
+#
+# Vault requirements (add to vault/secrets.yaml):
+#   authentik_secret_key         — 50-char random string
+#   authentik_pg_password        — postgres password for authentik user
+#   authentik_bootstrap_email    — initial akadmin email
+#   authentik_bootstrap_password — initial akadmin password (change after login)
+#
+# Run:
+#   ansible-playbook -i inventory/hosts.yaml site.yaml --tags authentik --ask-vault-pass
+
+- name: Only run Authentik install from init node
+  when: inventory_hostname in groups['k3s_init']
+  block:
+
+    # ── Namespace ─────────────────────────────────────────────────
+    - name: Create authentik namespace
+      ansible.builtin.shell: |
+        kubectl apply -f - <<EOF
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: {{ authentik_namespace }}
+        EOF
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+
+    # ── CNPG credentials secret ───────────────────────────────────
+    # Must exist before the CNPG Cluster CR is applied.
+    - name: Create CNPG credentials secret for Authentik postgres
+      ansible.builtin.shell: |
+        kubectl apply -f - <<EOF
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: {{ authentik_pg_secret }}
+          namespace: {{ authentik_namespace }}
+        type: kubernetes.io/basic-auth
+        stringData:
+          username: "{{ authentik_pg_owner }}"
+          password: "{{ authentik_pg_password }}"
+        EOF
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      no_log: true
+
+    # ── CNPG PostgreSQL cluster ───────────────────────────────────
+    - name: Render CNPG cluster manifest
+      ansible.builtin.template:
+        src: pg-cluster.yaml.j2
+        dest: /tmp/authentik-pg-cluster.yaml
+        mode: "0600"
+
+    - name: Apply CNPG cluster for Authentik
+      ansible.builtin.command: kubectl apply -f /tmp/authentik-pg-cluster.yaml
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: true
+
+    - name: Wait for CNPG cluster to have a primary instance
+      ansible.builtin.command: >
+        kubectl wait cluster/{{ authentik_pg_cluster_name }}
+        -n {{ authentik_namespace }}
+        --for=condition=Ready
+        --timeout=300s
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+
+    - name: Clean up CNPG cluster manifest
+      ansible.builtin.file:
+        path: /tmp/authentik-pg-cluster.yaml
+        state: absent
+
+    # ── Redis ─────────────────────────────────────────────────────
+    - name: Render Redis manifest
+      ansible.builtin.template:
+        src: redis.yaml.j2
+        dest: /tmp/authentik-redis.yaml
+        mode: "0600"
+
+    - name: Apply Redis StatefulSet and Service
+      ansible.builtin.command: kubectl apply -f /tmp/authentik-redis.yaml
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: true
+
+    - name: Wait for Redis to be ready
+      ansible.builtin.command: >
+        kubectl rollout status statefulset/authentik-redis
+        -n {{ authentik_namespace }}
+        --timeout=120s
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+
+    - name: Clean up Redis manifest
+      ansible.builtin.file:
+        path: /tmp/authentik-redis.yaml
+        state: absent
+
+    # ── Authentik Helm ────────────────────────────────────────────
+    - name: Add Authentik Helm repo
+      ansible.builtin.command: helm repo add authentik https://charts.goauthentik.io
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: repo_add
+      changed_when: '"already exists" not in repo_add.stdout'
+
+    - name: Update Helm repos
+      ansible.builtin.command: helm repo update
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+
+    - name: Render Authentik values.yaml
+      ansible.builtin.template:
+        src: values.yaml.j2
+        dest: /tmp/authentik-values.yaml
+        mode: "0600"
+
+    - name: Deploy Authentik via Helm
+      ansible.builtin.command: >
+        helm upgrade --install authentik authentik/authentik
+        --namespace {{ authentik_namespace }}
+        --create-namespace
+        --version {{ authentik_chart_version }}
+        -f /tmp/authentik-values.yaml
+        --wait --timeout 10m
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Clean up Authentik values file
+      ansible.builtin.file:
+        path: /tmp/authentik-values.yaml
+        state: absent
+
+    # ── OPNsense registration ─────────────────────────────────────
+    # Registers idp.{{ base_domain }} in:
+    #   - Unbound (DNS → OPNsense LAN IP)
+    #   - HAProxy (SNI ACL + use-backend → k3s-ingress)
+    #   - os-acme-client (Let's Encrypt cert via Cloudflare DNS-01)
+    # Internal only (public: false) — IdP should not be WAN-exposed.
+    - name: Register Authentik in OPNsense (Unbound + HAProxy + ACME)
+      ansible.builtin.include_role:
+        name: opnsense-register-service
+      vars:
+        service:
+          name: authentik
+          hostname: "{{ authentik_hostname }}"
+          public: false
+          acme_cert: true
+
+    # ── Summary ───────────────────────────────────────────────────
+    - name: Print Authentik access info
+      ansible.builtin.debug:
+        msg:
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "  Authentik is ready."
+          - "  URL      : https://{{ authentik_hostname }}"
+          - "  Admin UI : https://{{ authentik_hostname }}/if/admin/"
+          - "  Login    : {{ authentik_bootstrap_email }}"
+          - "  Password : (from vault: authentik_bootstrap_password)"
+          - ""
+          - "  Change the bootstrap password after first login."
+          - ""
+          - "  PostgreSQL: {{ authentik_pg_cluster_name }}-rw.{{ authentik_namespace }}"
+          - "  Redis     : authentik-redis-master.{{ authentik_namespace }}"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
