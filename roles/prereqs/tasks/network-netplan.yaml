@@ -33,7 +33,7 @@
           {{ k3s_iface }}:
             dhcp4: false
             dhcp6: false
-            accept-ra: true
+            accept-ra: false
             addresses:
               - {{ k3s_static_ip }}/24
             routes:

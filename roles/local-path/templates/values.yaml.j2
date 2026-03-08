@@ -1,0 +1,15 @@
+# local-path-provisioner Helm values
+# Rendered by Ansible from roles/local-path/templates/values.yaml.j2
+
+storageClass:
+  create: true
+  name: {{ local_path_storage_class }}
+  defaultClass: false        # Longhorn stays as cluster default
+  reclaimPolicy: Delete
+  volumeBindingMode: WaitForFirstConsumer   # critical: pod must schedule first so
+                                            # local-path creates volume on the correct node
+
+nodePathMap:
+  - node: DEFAULT
+    paths:
+      - {{ local_path_data_dir }}

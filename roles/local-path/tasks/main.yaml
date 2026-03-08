@@ -1,0 +1,98 @@
+---
+# roles/local-path/tasks/main.yaml
+#
+# Installs rancher/local-path-provisioner via versioned upstream manifest.
+# No Helm chart exists for this project — upstream ships kubectl/kustomize only.
+#
+# Provides a node-local StorageClass ("local-path") backed by a subdirectory
+# on /dev/sdb (/var/lib/longhorn/local-path) — keeping volumes off the OS disk.
+#
+# After the base manifest is applied, a patch ConfigMap and a patch StorageClass
+# are applied to override the default data path and binding mode.
+#
+# WaitForFirstConsumer binding ensures volumes are created on the same node
+# the consuming pod is scheduled on. This is essential for CNPG, which pins
+# its Postgres pods to the node that owns their data.
+#
+# StorageClass is NOT set as cluster default — Longhorn remains default.
+# Reference explicitly in PVCs/Helm values with: storageClassName: local-path
+
+- name: Only run local-path install from init node
+  when: inventory_hostname in groups['k3s_init']
+  block:
+
+    - name: Ensure local-path data directory exists on all nodes
+      ansible.builtin.file:
+        path: "{{ local_path_data_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['k3s_cluster'] }}"
+
+    - name: Apply local-path-provisioner base manifest
+      ansible.builtin.command: >
+        kubectl apply -f
+        https://raw.githubusercontent.com/rancher/local-path-provisioner/{{ local_path_version }}/deploy/local-path-storage.yaml
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: manifest_apply
+      changed_when: '"unchanged" not in manifest_apply.stdout'
+
+    - name: Wait for local-path-provisioner pod to be ready
+      ansible.builtin.command: >
+        kubectl rollout status deployment/local-path-provisioner
+        -n {{ local_path_namespace }} --timeout=120s
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+
+    - name: Patch ConfigMap — override data path to sdb mount
+      ansible.builtin.shell: |
+        kubectl patch configmap local-path-config \
+          -n {{ local_path_namespace }} \
+          --type merge \
+          -p '{
+            "data": {
+              "config.json": "{\"nodePathMap\":[{\"node\":\"DEFAULT_PATH_FOR_NON_LISTED_NODES\",\"paths\":[\"{{ local_path_data_dir }}\"]}]}"
+            }
+          }'
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: true
+
+    - name: Patch StorageClass — set WaitForFirstConsumer and remove default annotation
+      ansible.builtin.shell: |
+        kubectl apply -f - <<EOF
+        apiVersion: storage.k8s.io/v1
+        kind: StorageClass
+        metadata:
+          name: {{ local_path_storage_class }}
+          annotations:
+            storageclass.kubernetes.io/is-default-class: "false"
+        provisioner: rancher.io/local-path
+        reclaimPolicy: Delete
+        volumeBindingMode: WaitForFirstConsumer
+        EOF
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Verify local-path StorageClass is present
+      ansible.builtin.command: kubectl get storageclass {{ local_path_storage_class }}
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: sc_check
+      changed_when: false
+
+    - name: Print local-path StorageClass status
+      ansible.builtin.debug:
+        msg:
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "  local-path-provisioner is ready."
+          - "  StorageClass : {{ local_path_storage_class }} (WaitForFirstConsumer)"
+          - "  Data root    : {{ local_path_data_dir }} (on /dev/sdb, each node)"
+          - "  Default SC   : no — Longhorn remains default"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

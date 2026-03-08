@@ -1,0 +1,73 @@
+---
+# roles/cnpg/tasks/main.yaml
+#
+# Installs the CloudNativePG operator via Helm.
+# The operator manages Postgres Cluster CRs deployed by other roles
+# (authentik, librenms, etc.) — this role only installs the operator itself.
+#
+# Architecture:
+#   - CNPG operator runs in cnpg-system namespace
+#   - Each application deploys its own Cluster CR in its own namespace
+#   - Storage: local-path (node-local NVMe) — fast writes, CNPG replicates via WAL
+#   - 3 instances per cluster (1 primary, 2 synchronous standbys) matches 3-node topology
+#
+# Usage from a consuming role:
+#   Deploy a Cluster CR with storageClass: {{ cnpg_storage_class }}
+#   See roles/cnpg/templates/cluster.yaml.j2 for a reusable template.
+
+- name: Only run CNPG install from init node
+  when: inventory_hostname in groups['k3s_init']
+  block:
+
+    - name: Add CNPG Helm repo
+      ansible.builtin.command: >
+        helm repo add cnpg https://cloudnative-pg.github.io/charts
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: repo_add
+      changed_when: '"already exists" not in repo_add.stdout'
+
+    - name: Update Helm repos
+      ansible.builtin.command: helm repo update
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+
+    - name: Deploy CNPG operator via Helm
+      ansible.builtin.command: >
+        helm upgrade --install cnpg cnpg/cloudnative-pg
+        --namespace {{ cnpg_namespace }}
+        --create-namespace
+        --version {{ cnpg_chart_version }}
+        --set monitoring.enablePodMonitor=false
+        --wait --timeout 5m
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Wait for CNPG operator to be ready
+      ansible.builtin.command: >
+        kubectl rollout status deployment/cnpg-cloudnative-pg
+        -n {{ cnpg_namespace }} --timeout=120s
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+
+    - name: Verify CNPG CRDs are installed
+      ansible.builtin.command: kubectl get crd clusters.postgresql.cnpg.io
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: crd_check
+      changed_when: false
+
+    - name: Print CNPG status
+      ansible.builtin.debug:
+        msg:
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "  CloudNativePG operator is ready."
+          - "  Namespace    : {{ cnpg_namespace }}"
+          - "  Storage class: {{ cnpg_storage_class }}"
+          - "  CRD          : {{ crd_check.stdout }}"
+          - ""
+          - "  Deploy Postgres clusters via Cluster CRs in consuming roles."
+          - "  See roles/cnpg/templates/cluster.yaml.j2 for a reusable template."
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

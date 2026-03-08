@@ -9,6 +9,7 @@
 #
 # Tags:
 #   prereqs, k3s, calico, cert-manager, longhorn, ingress, dashboard
+#   local-path, cnpg
 #   opnsense, opnsense-plugins, opnsense-acme, opnsense-haproxy, opnsense-ddclient
 #   register-service
 #
@@ -102,7 +103,30 @@
   roles:
     - headlamp
 
-# ── Phase 9: OPNsense — plugin install ───────────────────────────
+# ── Phase 9: local-path-provisioner ──────────────────────────────
+# Node-local StorageClass backed by /var/lib/longhorn/local-path (sdb).
+# WaitForFirstConsumer binding — pod schedules first, volume follows.
+# Used by CNPG for low-latency Postgres storage; Longhorn remains default SC.
+- name: Install local-path-provisioner
+  hosts: k3s_init
+  become: true
+  gather_facts: false
+  tags: [local-path]
+  roles:
+    - local-path
+
+# ── Phase 10: CloudNativePG operator ─────────────────────────────
+# Installs the CNPG operator only — Cluster CRs are deployed by consuming
+# roles (authentik, librenms, etc.) using roles/cnpg/templates/cluster.yaml.j2.
+- name: Install CloudNativePG operator
+  hosts: k3s_init
+  become: true
+  gather_facts: false
+  tags: [cnpg]
+  roles:
+    - cnpg
+
+# ── Phase 11: OPNsense — plugin install ──────────────────────────
 # Installs os-haproxy and os-acme-client; removes stale plugin stubs.
 # Safe to re-run.
 - name: Install OPNsense plugins (os-haproxy, os-acme-client)
@@ -115,7 +139,7 @@
   roles:
     - opnsense-plugins
 
-# ── Phase 10: OPNsense — ACME / Let's Encrypt ────────────────────
+# ── Phase 12: OPNsense — ACME / Let's Encrypt ────────────────────
 # Configures os-acme-client: account, Cloudflare DNS-01, fw cert.
 # Safe to re-run (check-before-create throughout).
 - name: Configure OPNsense ACME / Let's Encrypt
@@ -128,7 +152,7 @@
   roles:
     - opnsense-acme
 
-# ── Phase 11: OPNsense — HAProxy ─────────────────────────────────
+# ── Phase 13: OPNsense — HAProxy ─────────────────────────────────
 # Configures HAProxy: servers, backends, ACLs, actions, frontends.
 # Depends on acme_cert_uuid set by opnsense-acme, or looks it up
 # from the cert manager when run standalone.
@@ -143,7 +167,7 @@
   roles:
     - opnsense-haproxy
 
-# ── Phase 12: OPNsense — ddclient (Dynamic DNS) ──────────────────
+# ── Phase 14: OPNsense — ddclient (Dynamic DNS) ──────────────────
 # Installs os-ddclient and configures Cloudflare DynDNS for WAN IP updates.
 # Only runs when opnsense_ddns_hosts is non-empty.
 # Skip entirely with: --skip-tags opnsense-ddclient
@@ -158,7 +182,7 @@
     - role: opnsense-ddclient
       when: opnsense_ddns_hosts | default([]) | length > 0
 
-# ── Phase 13: OPNsense — register-service ────────────────────────
+# ── Phase 15: OPNsense — register-service ────────────────────────
 # Registers a single service into the OPNsense stack on demand.
 # Not run during a full deploy; invoke explicitly with --tags register-service
 # and pass a 'service' dict via -e.
