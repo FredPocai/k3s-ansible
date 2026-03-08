@@ -2,7 +2,8 @@
 # roles/local-path/defaults/main.yaml
 
 local_path_namespace: local-path-storage
-local_path_chart_version: "0.0.28"   # https://github.com/rancher/local-path-provisioner/releases
+local_path_version: "v0.0.30"   # https://github.com/rancher/local-path-provisioner/releases
+                                  # used to pin the upstream manifest URL
 
 # Root directory on each node where local-path volumes are created.
 # Placed on sdb (mounted at /var/lib/longhorn) to keep off the OS disk.
