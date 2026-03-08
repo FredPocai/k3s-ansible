@@ -1,0 +1,80 @@
+---
+# roles/local-path/tasks/main.yaml
+#
+# Installs rancher/local-path-provisioner via Helm.
+# Provides a node-local StorageClass ("local-path") backed by a subdirectory
+# on /dev/sdb (/var/lib/longhorn/local-path) — keeping volumes off the OS disk.
+#
+# WaitForFirstConsumer binding ensures volumes are created on the same node
+# the consuming pod is scheduled on. This is essential for CNPG, which pins
+# its Postgres pods to the node that owns their data.
+#
+# StorageClass is NOT set as cluster default — Longhorn remains default.
+# Reference explicitly in PVCs/Helm values with: storageClassName: local-path
+
+- name: Only run local-path install from init node
+  when: inventory_hostname in groups['k3s_init']
+  block:
+
+    - name: Ensure local-path data directory exists on all nodes
+      ansible.builtin.file:
+        path: "{{ local_path_data_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['k3s_cluster'] }}"
+
+    - name: Add local-path-provisioner Helm repo
+      ansible.builtin.command: >
+        helm repo add local-path-provisioner
+        https://charts.rancher.io/local-path-provisioner
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: repo_add
+      changed_when: '"already exists" not in repo_add.stdout'
+
+    - name: Update Helm repos
+      ansible.builtin.command: helm repo update
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+
+    - name: Render local-path values.yaml
+      ansible.builtin.template:
+        src: values.yaml.j2
+        dest: /tmp/local-path-values.yaml
+        mode: "0600"
+
+    - name: Deploy local-path-provisioner via Helm
+      ansible.builtin.command: >
+        helm upgrade --install local-path-provisioner
+        local-path-provisioner/local-path-provisioner
+        --namespace {{ local_path_namespace }}
+        --create-namespace
+        --version {{ local_path_chart_version }}
+        -f /tmp/local-path-values.yaml
+        --wait --timeout 3m
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Verify local-path StorageClass is present
+      ansible.builtin.command: kubectl get storageclass {{ local_path_storage_class }}
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: sc_check
+      changed_when: false
+
+    - name: Clean up rendered values file
+      ansible.builtin.file:
+        path: /tmp/local-path-values.yaml
+        state: absent
+
+    - name: Print local-path StorageClass status
+      ansible.builtin.debug:
+        msg:
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "  local-path-provisioner is ready."
+          - "  StorageClass : {{ local_path_storage_class }} (WaitForFirstConsumer)"
+          - "  Data root    : {{ local_path_data_dir }} (on /dev/sdb, each node)"
+          - "  Default SC   : no — Longhorn remains default"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -1,0 +1,17 @@
+---
+# roles/cnpg/defaults/main.yaml
+
+cnpg_namespace: cnpg-system
+cnpg_chart_version: "0.22.1"   # https://github.com/cloudnative-pg/charts/releases
+                                 # installs operator version 1.24.x
+
+# StorageClass used for CNPG cluster PVCs.
+# Points at local-path-provisioner by default for low-latency NVMe-backed
+# Postgres storage. CNPG handles its own WAL-streaming replication across
+# the three instances, so block-level replication (Longhorn) is not needed
+# and would add unnecessary write latency.
+cnpg_storage_class: local-path
+
+# Default storage size per Postgres instance (primary + 2 standbys = 3x this).
+# Adjust per Cluster CR in the consuming role (authentik, librenms, etc.).
+cnpg_default_storage_size: 10Gi

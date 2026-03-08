@@ -1,0 +1,59 @@
+# roles/cnpg/templates/cluster.yaml.j2
+#
+# Reusable CNPG Cluster CR template.
+# Include this from consuming roles via ansible.builtin.template, e.g.:
+#
+#   - name: Deploy Postgres cluster for {{ app_name }}
+#     ansible.builtin.shell: kubectl apply -f -
+#     args:
+#       stdin: "{{ lookup('template', '../cnpg/templates/cluster.yaml.j2') }}"
+#
+# Required variables (set in consuming role defaults or vars):
+#   cnpg_cluster_name      e.g. "authentik-pg"
+#   cnpg_cluster_namespace e.g. "authentik"
+#   cnpg_cluster_db        e.g. "authentik"
+#   cnpg_cluster_owner     e.g. "authentik"
+#   cnpg_cluster_secret    e.g. "authentik-pg-credentials"  (pre-existing Secret)
+#   cnpg_cluster_size      e.g. "10Gi"
+#
+# Optional:
+#   cnpg_cluster_instances  (default 3 — matches 3-node cluster topology)
+#   cnpg_storage_class      (default from roles/cnpg/defaults/main.yaml)
+#   cnpg_pg_version         (default 16)
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ cnpg_cluster_name }}
+  namespace: {{ cnpg_cluster_namespace }}
+spec:
+  instances: {{ cnpg_cluster_instances | default(3) }}
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "256MB"
+
+  bootstrap:
+    initdb:
+      database: {{ cnpg_cluster_db }}
+      owner: {{ cnpg_cluster_owner }}
+      secret:
+        name: {{ cnpg_cluster_secret }}
+
+  storage:
+    storageClass: {{ cnpg_storage_class | default('local-path') }}
+    size: {{ cnpg_cluster_size | default(cnpg_default_storage_size) }}
+
+  # Each instance is pinned to a different node via anti-affinity.
+  # Combined with WaitForFirstConsumer on local-path, this ensures:
+  #   - primary and standbys land on separate nodes
+  #   - local-path PVCs are created on the node each pod runs on
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+
+  # Keep WAL segments for up to 5 days to support PITR if needed later.
+  backup:
+    retentionPolicy: "5d"
