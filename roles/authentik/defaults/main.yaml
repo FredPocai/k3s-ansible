@@ -1,0 +1,29 @@
+---
+# roles/authentik/defaults/main.yaml
+
+authentik_namespace: authentik
+authentik_chart_version: "2024.12.3"   # https://github.com/goauthentik/authentik/releases
+                                        # chart version tracks app version
+
+# Hostname — registered in OPNsense via opnsense-register-service
+authentik_hostname: "idp.{{ base_domain }}"
+
+# ── PostgreSQL (CNPG) ─────────────────────────────────────────────
+authentik_pg_cluster_name: authentik-pg
+authentik_pg_db: authentik
+authentik_pg_owner: authentik
+authentik_pg_secret: authentik-pg-credentials   # Secret must exist before CNPG cluster deploys
+authentik_pg_size: 10Gi
+
+# ── Redis ─────────────────────────────────────────────────────────
+# Authentik uses Redis for task queuing and caching.
+# Deployed as a single-instance StatefulSet on Longhorn (replicated SC)
+# since Redis data is ephemeral/reconstructable — no need for local-path.
+authentik_redis_storage_class: longhorn
+authentik_redis_size: 2Gi
+
+# ── Secret keys (set in vault/secrets.yaml) ───────────────────────
+# authentik_secret_key       — random 50-char string, used for signing
+# authentik_pg_password      — postgres password for the authentik user
+# authentik_bootstrap_email  — initial admin email
+# authentik_bootstrap_password — initial admin password (change after first login)

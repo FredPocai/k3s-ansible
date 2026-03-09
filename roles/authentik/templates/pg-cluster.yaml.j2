@@ -1,0 +1,36 @@
+# roles/authentik/templates/pg-cluster.yaml.j2
+# CNPG Cluster CR for Authentik's PostgreSQL backend.
+# 3 instances — one per node, local-path StorageClass for low-latency writes.
+# CNPG WAL streaming handles replication; no Longhorn double-replication needed.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ authentik_pg_cluster_name }}
+  namespace: {{ authentik_namespace }}
+spec:
+  instances: 3
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "256MB"
+
+  bootstrap:
+    initdb:
+      database: {{ authentik_pg_db }}
+      owner: {{ authentik_pg_owner }}
+      secret:
+        name: {{ authentik_pg_secret }}
+
+  storage:
+    storageClass: local-path
+    size: {{ authentik_pg_size }}
+
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+
+  backup:
+    retentionPolicy: "5d"

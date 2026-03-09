@@ -9,7 +9,7 @@
 #
 # Tags:
 #   prereqs, k3s, calico, cert-manager, longhorn, ingress, dashboard
-#   local-path, cnpg
+#   local-path, cnpg, authentik
 #   opnsense, opnsense-plugins, opnsense-acme, opnsense-haproxy, opnsense-ddclient
 #   register-service
 #
@@ -120,13 +120,29 @@
 # roles (authentik, librenms, etc.) using roles/cnpg/templates/cluster.yaml.j2.
 - name: Install CloudNativePG operator
   hosts: k3s_init
-  become: true
+  # become: true
   gather_facts: false
   tags: [cnpg]
   roles:
     - cnpg
 
-# ── Phase 11: OPNsense — plugin install ──────────────────────────
+# ── Phase 11: Authentik IdP ───────────────────────────────────────
+# Self-hosted OIDC/SAML identity provider.
+# Deploys: CNPG PostgreSQL cluster, Redis, Authentik server+worker.
+# Registers idp.{{ base_domain }} in OPNsense (Unbound + HAProxy + ACME).
+# Vault requirements: authentik_secret_key, authentik_pg_password,
+#                     authentik_bootstrap_email, authentik_bootstrap_password
+- name: Install Authentik IdP
+  hosts: k3s_init
+  # become: true
+  gather_facts: false
+  tags: [authentik]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - authentik
+
+# ── Phase 12: OPNsense — plugin install ──────────────────────────
 # Installs os-haproxy and os-acme-client; removes stale plugin stubs.
 # Safe to re-run.
 - name: Install OPNsense plugins (os-haproxy, os-acme-client)
@@ -139,9 +155,7 @@
   roles:
     - opnsense-plugins
 
-# ── Phase 12: OPNsense — ACME / Let's Encrypt ────────────────────
-# Configures os-acme-client: account, Cloudflare DNS-01, fw cert.
-# Safe to re-run (check-before-create throughout).
+# ── Phase 13: OPNsense — ACME / Let's Encrypt ────────────────────
 - name: Configure OPNsense ACME / Let's Encrypt
   hosts: k3s_init
   become: false
@@ -152,11 +166,7 @@
   roles:
     - opnsense-acme
 
-# ── Phase 13: OPNsense — HAProxy ─────────────────────────────────
-# Configures HAProxy: servers, backends, ACLs, actions, frontends.
-# Depends on acme_cert_uuid set by opnsense-acme, or looks it up
-# from the cert manager when run standalone.
-# Safe to re-run (check-before-create throughout).
+# ── Phase 14: OPNsense — HAProxy ─────────────────────────────────
 - name: Configure OPNsense HAProxy
   hosts: k3s_init
   become: false
@@ -167,10 +177,7 @@
   roles:
     - opnsense-haproxy
 
-# ── Phase 14: OPNsense — ddclient (Dynamic DNS) ──────────────────
-# Installs os-ddclient and configures Cloudflare DynDNS for WAN IP updates.
-# Only runs when opnsense_ddns_hosts is non-empty.
-# Skip entirely with: --skip-tags opnsense-ddclient
+# ── Phase 15: OPNsense — ddclient (Dynamic DNS) ──────────────────
 - name: Configure OPNsense ddclient (DynDNS)
   hosts: k3s_init
   become: false
@@ -182,21 +189,19 @@
     - role: opnsense-ddclient
       when: opnsense_ddns_hosts | default([]) | length > 0
 
-# ── Phase 15: OPNsense — register-service ────────────────────────
-# Registers a single service into the OPNsense stack on demand.
-# Not run during a full deploy; invoke explicitly with --tags register-service
-# and pass a 'service' dict via -e.
+# ── Phase 16: OPNsense — register-service ────────────────────────
+# Not run during full deploy — invoke explicitly with --tags register-service.
 #
 # Examples:
-#   # Internal-only service (Unbound + HAProxy SNI + ACME cert):
+#   # Internal-only:
 #   ansible-playbook -i inventory/hosts.yaml site.yaml \
 #     --tags register-service --ask-vault-pass \
-#     -e '{"service":{"name":"grafana","hostname":"grafana.example.com"}}'
+#     -e '{"service":{"name":"myapp","hostname":"myapp.example.com"}}'
 #
-#   # Public service (above + Cloudflare A record + NAT portforward):
+#   # Public (CF A record + NAT):
 #   ansible-playbook -i inventory/hosts.yaml site.yaml \
 #     --tags register-service --ask-vault-pass \
-#     -e '{"service":{"name":"grafana","hostname":"grafana.example.com","public":true}}'
+#     -e '{"service":{"name":"myapp","hostname":"myapp.example.com","public":true}}'
 - name: Register a service in OPNsense (on-demand)
   hosts: k3s_init
   become: false

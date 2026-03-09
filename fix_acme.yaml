@@ -1,0 +1,170 @@
+---
+# fix-acme-certs.yaml
+#
+# One-shot remediation playbook for broken ACME certificate entries.
+#
+# Problems addressed:
+#   1. fw.pocai.net and test.pocai.net have a ghost validationMethod UUID
+#      (2992c491-d4bc-48f4-bd73-b3bc4215e053) pointing to a deleted validation
+#      entry — patched to use the working cloudflare-dns01 UUID.
+#   2. idp.pocai.net cert is at statusCode 100 (pending) because the sign call
+#      never ran due to a broken URL in opnsense-register-service — triggered here.
+#
+# Run:
+#   ansible-playbook -i inventory/hosts.yaml fix-acme-certs.yaml --ask-vault-pass
+#
+# Safe to re-run — all tasks are idempotent or check before acting.
+
+- name: Fix broken ACME cert validation methods and trigger pending sign
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  vars_files:
+    - vault/secrets.yaml
+
+  tasks:
+
+    # ── Step 1: Get current state ──────────────────────────────────
+    - name: Fetch all ACME certificates
+      ansible.builtin.uri:
+        url: "{{ opnsense_api_base }}/api/acmeclient/certificates/search"
+        method: GET
+        url_username: "{{ opnsense_api_key }}"
+        url_password: "{{ opnsense_api_secret }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: true
+      register: _acme_certs
+      delegate_to: localhost
+
+    - name: Fetch all ACME validation methods
+      ansible.builtin.uri:
+        url: "{{ opnsense_api_base }}/api/acmeclient/validations/search"
+        method: GET
+        url_username: "{{ opnsense_api_key }}"
+        url_password: "{{ opnsense_api_secret }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: true
+      register: _acme_validations
+      delegate_to: localhost
+
+    - name: Set cloudflare-dns01 UUID fact
+      ansible.builtin.set_fact:
+        _cf_validation_uuid: >-
+          {{
+            _acme_validations.json.rows
+            | selectattr('name', 'equalto', 'cloudflare-dns01')
+            | map(attribute='uuid') | first
+          }}
+
+    - name: Show validation UUID being used
+      ansible.builtin.debug:
+        msg: "cloudflare-dns01 UUID: {{ _cf_validation_uuid }}"
+
+    # ── Step 2: Patch broken certs ────────────────────────────────
+    # Certs whose validationMethod has no %validationMethod label are broken.
+    # We patch each one by UUID to point at the working cloudflare-dns01 entry.
+
+    - name: Build list of certs with broken validation UUID
+      ansible.builtin.set_fact:
+        _broken_certs: >-
+          {{
+            _acme_certs.json.rows
+            | rejectattr('%validationMethod', 'defined')
+            | list
+          }}
+
+    - name: Show broken certs found
+      ansible.builtin.debug:
+        msg: "Broken certs: {{ _broken_certs | map(attribute='name') | list }}"
+
+    - name: Patch broken cert validationMethod → cloudflare-dns01
+      ansible.builtin.uri:
+        url: "{{ opnsense_api_base }}/api/acmeclient/certificates/set/{{ item.uuid }}"
+        method: POST
+        url_username: "{{ opnsense_api_key }}"
+        url_password: "{{ opnsense_api_secret }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          certificate:
+            enabled: "{{ item.enabled }}"
+            name: "{{ item.name }}"
+            description: "{{ item.description }}"
+            altNames: "{{ item.altNames }}"
+            account: "{{ item.account }}"
+            validationMethod: "{{ _cf_validation_uuid }}"
+            keyLength: "{{ item.keyLength }}"
+            autoRenewal: "{{ item.autoRenewal }}"
+            renewInterval: "{{ item.renewInterval }}"
+            ocsp: "{{ item.ocsp }}"
+            profile: "{{ item.profile }}"
+            restartActions: "{{ item.restartActions }}"
+            aliasmode: "{{ item.aliasmode }}"
+            domainalias: "{{ item.domainalias }}"
+            challengealias: "{{ item.challengealias }}"
+        status_code: [200]
+      delegate_to: localhost
+      loop: "{{ _broken_certs }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # ── Step 3: Trigger sign for idp.pocai.net (statusCode 100) ──
+    - name: Get idp cert UUID
+      ansible.builtin.set_fact:
+        _idp_cert: >-
+          {{
+            _acme_certs.json.rows
+            | selectattr('name', 'equalto', 'idp.' + base_domain)
+            | list | first | default({})
+          }}
+
+    - name: Trigger sign for idp.{{ base_domain }} if still pending
+      ansible.builtin.uri:
+        url: "{{ opnsense_api_base }}/api/acmeclient/certificates/sign/{{ _idp_cert.uuid }}"
+        method: POST
+        url_username: "{{ opnsense_api_key }}"
+        url_password: "{{ opnsense_api_secret }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body: {}
+        status_code: [200]
+        timeout: 120
+      delegate_to: localhost
+      when:
+        - _idp_cert.uuid is defined
+        - _idp_cert.statusCode | default('') == '100'
+
+    - name: Wait for DNS-01 challenge and cert issuance (~90s)
+      ansible.builtin.pause:
+        seconds: 90
+        prompt: "Waiting for Cloudflare DNS-01 and cert issuance for idp.{{ base_domain }}..."
+      when:
+        - _idp_cert.uuid is defined
+        - _idp_cert.statusCode | default('') == '100'
+
+    # ── Step 4: Verify final state ────────────────────────────────
+    - name: Fetch all ACME certificates (post-fix)
+      ansible.builtin.uri:
+        url: "{{ opnsense_api_base }}/api/acmeclient/certificates/search"
+        method: GET
+        url_username: "{{ opnsense_api_key }}"
+        url_password: "{{ opnsense_api_secret }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: true
+      register: _acme_certs_final
+      delegate_to: localhost
+
+    - name: Print final cert status
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.name }}:
+          status={{ item.statusCode }}
+          method={{ item['%validationMethod'] | default('BROKEN - no method label') }}
+      loop: "{{ _acme_certs_final.json.rows }}"
+      loop_control:
+        label: "{{ item.name }}"
