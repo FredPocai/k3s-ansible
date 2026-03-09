@@ -30,10 +30,7 @@ server:
       # Required for authentik's websocket-based flow executor
       nginx.ingress.kubernetes.io/proxy-buffering: "off"
     hosts:
-      - host: "{{ authentik_hostname }}"
-        paths:
-          - path: /
-            pathType: Prefix
+      - "{{ authentik_hostname }}"
     tls:
       - hosts:
           - "{{ authentik_hostname }}"

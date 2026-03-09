@@ -120,7 +120,7 @@
 # roles (authentik, librenms, etc.) using roles/cnpg/templates/cluster.yaml.j2.
 - name: Install CloudNativePG operator
   hosts: k3s_init
-  become: true
+  # become: true
   gather_facts: false
   tags: [cnpg]
   roles:
@@ -134,7 +134,7 @@
 #                     authentik_bootstrap_email, authentik_bootstrap_password
 - name: Install Authentik IdP
   hosts: k3s_init
-  become: true
+  # become: true
   gather_facts: false
   tags: [authentik]
   vars_files:

@@ -39,7 +39,7 @@
 
 - name: Get existing Unbound host overrides
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/unbound/host_overrides/searchHostOverride"
+    url: "{{ opnsense_api_base }}/api/unbound/settings/search_host_override"
     method: GET
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -52,7 +52,7 @@
 
 - name: Register {{ _svc_host }} in Unbound
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/unbound/host_overrides/addHostOverride"
+    url: "{{ opnsense_api_base }}/api/unbound/settings/add_host_override"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -301,8 +301,13 @@
 
 - name: ACME — issue certificate for {{ _svc_host }} (~90s)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/acmeclient/certificates/sign/\
-{{ (_acme_certs.json.rows | selectattr('name', 'equalto', _svc_host) | map(attribute='uuid') | list | first) if not _svc_acme_cert_created.changed | default(false) else _svc_acme_cert_created.json.uuid | default('') }}"
+    url: "{{ opnsense_api_base }}/api/acmeclient/certificates/sign/{{ 
+            (_acme_certs.json.rows 
+               | selectattr('name', 'equalto', _svc_host) 
+               | map(attribute='uuid') 
+               | list | first) if not _svc_acme_cert_created.changed 
+               | default(false) else _svc_acme_cert_created.json.uuid 
+               | default('') }}"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
