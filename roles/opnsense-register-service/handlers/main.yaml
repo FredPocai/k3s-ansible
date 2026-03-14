@@ -1,0 +1,13 @@
+- name: Apply Unbound configuration
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/unbound/service/reconfigure"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+  delegate_to: localhost
+  tags: [opnsense, register-service]

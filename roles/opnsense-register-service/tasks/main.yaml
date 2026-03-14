@@ -50,6 +50,57 @@
   delegate_to: localhost
   tags: [opnsense, register-service]
 
+# - debug: var=_unbound_existing
+
+# - debug:
+#     var: _service
+#   vars: 
+#     _service: 
+#       fqdn: "{{ _svc_host }}"
+#       hostname: "{{ _svc_host.split('.')[:-2] | join('.') }}"
+#       domain: "{{ _svc_host.split('.')[-2::] | join('.') }}"
+
+# - debug: 
+#     var: _found
+#   vars: 
+#     _service: 
+#       fqdn: "{{ _svc_host }}"
+#       hostname: "{{ _svc_host.split('.')[:-2] | join('.') }}"
+#       domain: "{{ _svc_host.split('.')[-2::] | join('.') }}"
+#     _found: |-
+#       {{ _unbound_existing.json.rows 
+#          | selectattr('hostname', 'equalto', _service.hostname)
+#          | selectattr('domain', 'equalto', _service.domain) 
+#          | first }}
+
+# - debug: 
+#     var: _found
+#   vars: 
+#     _service: 
+#       fqdn: "{{ _svc_host }}"
+#       hostname: "{{ _svc_host.split('.')[:-2] | join('.') }}"
+#       domain: "{{ _svc_host.split('.')[-2::] | join('.') }}"
+#     _found: |-
+#       {{ _unbound_existing.json.rows 
+#          | selectattr('hostname', 'equalto', _service.hostname)
+#          | first }}
+
+# - debug: 
+#     var: _found
+#   vars: 
+#     _service: 
+#       fqdn: "{{ _svc_host }}"
+#       hostname: "{{ _svc_host.split('.')[:-2] | join('.') }}"
+#       domain: "{{ _svc_host.split('.')[-2::] | join('.') }}"
+#     _found: |-
+#       {{ _unbound_existing.json.rows 
+#          | selectattr('domain', 'equalto', _service.domain) 
+#          | first }}
+ 
+
+
+# - pause: 
+
 - name: Register {{ _svc_host }} in Unbound
   ansible.builtin.uri:
     url: "{{ opnsense_api_base }}/api/unbound/settings/add_host_override"
@@ -68,25 +119,17 @@
         description: "{{ _svc_host }} — managed by Ansible"
     status_code: [200, 201]
   delegate_to: localhost
-  when: >-
-    _unbound_existing.json.rows
-    | selectattr('hostname', 'equalto', _svc_host.split('.')[0])
-    | selectattr('domain',   'equalto', _svc_host.split('.')[1:] | join('.'))
-    | list | length == 0
-  tags: [opnsense, register-service]
-
-- name: Apply Unbound configuration
-  ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/unbound/service/reconfigure"
-    method: POST
-    url_username: "{{ opnsense_api_key }}"
-    url_password: "{{ opnsense_api_secret }}"
-    force_basic_auth: true
-    validate_certs: false
-    body_format: json
-    body: {}
-    status_code: [200]
-  delegate_to: localhost
+  vars: 
+    _service: 
+      fqdn: "{{ _svc_host }}"
+      hostname: "{{ _svc_host.split('.')[:-2] | join('.') }}"
+      domain: "{{ _svc_host.split('.')[-2::] | join('.') }}"
+    _found: |-
+      {{ _unbound_existing.json.rows 
+         | selectattr('hostname', 'equalto', _service.hostname)
+         | selectattr('domain', 'equalto', _service.domain) 
+         | first }}
+  when: (_found | length==0) or _found.server != _svc_backend_ip
   tags: [opnsense, register-service]
 
 # =================================================================
@@ -99,7 +142,7 @@
 
 - name: Create SNI ACL for {{ _svc_host }}
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addAcl"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_acl"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -111,7 +154,7 @@
         enabled: "1"
         name: "sni_{{ _svc_name }}"
         expression: "ssl_sni"
-        value: "{{ _svc_host }}"
+        ssl_sni: "{{ _svc_host }}"
         description: "SNI: {{ _svc_host }} — managed by Ansible"
     status_code: [200]
   delegate_to: localhost

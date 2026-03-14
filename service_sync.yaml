@@ -1,0 +1,57 @@
+
+- name: Refresh services in OPNsense/HAProxy/Unbound/ACME
+  hosts: k3s_init
+  gather_facts: false
+  vars_files:
+    - vault/secrets.yaml
+  tasks: 
+
+  - name: Register Static IP in DNS for node {{ svc.name }}
+    ansible.builtin.include_role: 
+      name: opnsense-unbound
+    loop_control: 
+      loop_var: l_host
+    loop: "{{ k3s_nodes }}"
+    vars: 
+      arecord: 
+        name: "{{ l_host.name }}"
+        ip: "{{ l_host.ip | default(opnsense_ip) }}"
+        fqdn: "{{ l_host.fqdn | default(l_host.name + '.' + base_domain) }}"
+        domain: "{{ (l_host.fqdn | split('.'))[1] | default(base_domain) }}"
+
+  - name: Apply Unbound configuration
+    ansible.builtin.uri:
+      url: "{{ opnsense_api_base }}/api/unbound/service/reconfigure"
+      method: POST
+      url_username: "{{ opnsense_api_key }}"
+      url_password: "{{ opnsense_api_secret }}"
+      force_basic_auth: true
+      validate_certs: false
+      body_format: json
+      body: {}
+      status_code: [200]
+    delegate_to: localhost
+  
+
+  - name: Include OPNsense role for target {{ svc.name }}
+    ansible.builtin.include_role: 
+      name: opnsense-register-service
+    loop_control: 
+      loop_var: svc
+    vars: 
+      service: "{{ svc }}"
+    loop: "{{ k3s_services }}"
+        
+  - name: Apply Unbound configuration
+    ansible.builtin.uri:
+      url: "{{ opnsense_api_base }}/api/unbound/service/reconfigure"
+      method: POST
+      url_username: "{{ opnsense_api_key }}"
+      url_password: "{{ opnsense_api_secret }}"
+      force_basic_auth: true
+      validate_certs: false
+      body_format: json
+      body: {}
+      status_code: [200]
+    delegate_to: localhost
+  

@@ -9,6 +9,13 @@
 #   :80   HTTP frontend  — redirect to HTTPS
 #
 # Tags: opnsense, opnsense-haproxy
+#
+# API field-name notes (confirmed from settings/get response):
+#   - Backend server membership : linkedServers  (NOT "servers")
+#   - Action type selection     : type           (NOT "operator")
+#   - Action backend target     : use_backend    (NOT "backend")
+#   - Action ACL linkage        : linkedAcls     (NOT "acl")
+#   - All endpoints             : snake_case     (add_server, add_backend, etc.)
 
 - name: Wait for HAProxy API to become available
   ansible.builtin.uri:
@@ -36,7 +43,7 @@
 
 - name: Create HAProxy server entries for k3s nodes
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addServer"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_server"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -62,7 +69,7 @@
 
 - name: Create HAProxy server entry for OPNsense GUI (:8080 HTTP)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addServer"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_server"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -86,7 +93,7 @@
 
 - name: Create HAProxy server entry for fw SSL-loopback (:8444)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addServer"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_server"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -136,11 +143,13 @@
 
 # =================================================================
 # BACKENDS
+# NOTE: the field that links servers into a backend pool is
+#       "linkedServers" (confirmed from settings/get), NOT "servers".
 # =================================================================
 
 - name: Create k3s-ingress backend (TCP, round-robin)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addBackend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_backend"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -153,7 +162,7 @@
         name: "k3s-ingress"
         mode: "tcp"
         algorithm: "roundrobin"
-        servers: "{{ _k3s_server_uuids }}"
+        linkedServers: "{{ _k3s_server_uuids }}"
         description: "k3s ingress-nginx nodes — managed by Ansible"
     status_code: [200]
   delegate_to: localhost
@@ -162,7 +171,7 @@
 
 - name: Create opnsense-gui backend (HTTP)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addBackend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_backend"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -175,7 +184,7 @@
         name: "opnsense-gui"
         mode: "http"
         algorithm: "roundrobin"
-        servers: "{{ _opnsense_server_uuid }}"
+        linkedServers: "{{ _opnsense_server_uuid }}"
         description: "OPNsense GUI :8080 — managed by Ansible"
     status_code: [200]
   delegate_to: localhost
@@ -184,7 +193,7 @@
 
 - name: Create fw-ssl-loopback backend (TCP)
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addBackend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_backend"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -197,7 +206,7 @@
         name: "fw-ssl-loopback"
         mode: "tcp"
         algorithm: "roundrobin"
-        servers: "{{ _fw_loopback_server_uuid }}"
+        linkedServers: "{{ _fw_loopback_server_uuid }}"
         description: "Loopback to fw HTTPS frontend :8444 — managed by Ansible"
     status_code: [200]
   delegate_to: localhost
@@ -231,12 +240,85 @@
   tags: [opnsense, opnsense-haproxy]
 
 # =================================================================
+# REPAIR: patch existing backends that were created with wrong field
+#         name ("servers" instead of "linkedServers") and therefore
+#         have empty server pools.  Idempotent: only fires when the
+#         backend exists but has no selected servers.
+# =================================================================
+
+- name: Repair k3s-ingress backend linkedServers (if empty)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/set_backend/{{ _k3s_backend_uuid }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      backend:
+        linkedServers: "{{ _k3s_server_uuids }}"
+    status_code: [200]
+  delegate_to: localhost
+  when: >-
+    (_hp_backends | dict2items
+     | selectattr('value.name', 'equalto', 'k3s-ingress') | first).value.linkedServers
+     | dict2items | selectattr('value.selected', 'equalto', 1) | list | length == 0
+  tags: [opnsense, opnsense-haproxy]
+
+- name: Repair opnsense-gui backend linkedServers (if empty)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/set_backend/{{ _opnsense_backend_uuid }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      backend:
+        linkedServers: "{{ _opnsense_server_uuid }}"
+    status_code: [200]
+  delegate_to: localhost
+  when: >-
+    (_hp_backends | dict2items
+     | selectattr('value.name', 'equalto', 'opnsense-gui') | first).value.linkedServers
+     | dict2items | selectattr('value.selected', 'equalto', 1) | list | length == 0
+  tags: [opnsense, opnsense-haproxy]
+
+- name: Repair fw-ssl-loopback backend linkedServers (if empty)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/set_backend/{{ _fw_loopback_backend_uuid }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      backend:
+        linkedServers: "{{ _fw_loopback_server_uuid }}"
+    status_code: [200]
+  delegate_to: localhost
+  when: >-
+    (_hp_backends | dict2items
+     | selectattr('value.name', 'equalto', 'fw-ssl-loopback') | first).value.linkedServers
+     | dict2items | selectattr('value.selected', 'equalto', 1) | list | length == 0
+  tags: [opnsense, opnsense-haproxy]
+
+# =================================================================
 # ACLs
+# NOTE: The OPNsense HAProxy config generator uses the expression-
+#       specific field, NOT the generic "value" field.
+#       For ssl_sni ACLs the correct POST field is "ssl_sni: <host>".
+#       Using "value: <host>" leaves the ssl_sni field empty, which
+#       generates "CONDITION INVALID / ERROR: missing parameters" in
+#       haproxy.conf and prevents the service from starting.
 # =================================================================
 
 - name: Create SNI ACL for each k3s service
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addAcl"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_acl"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -248,7 +330,7 @@
         enabled: "1"
         name: "sni_{{ item.name }}"
         expression: "ssl_sni"
-        value: "{{ item.hostname }}"
+        ssl_sni: "{{ item.hostname }}"
         description: "SNI: {{ item.hostname }} — managed by Ansible"
     status_code: [200]
   delegate_to: localhost
@@ -260,7 +342,7 @@
 
 - name: Create SNI ACL for fw.{{ base_domain }}
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addAcl"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_acl"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -272,24 +354,63 @@
         enabled: "1"
         name: "sni_fw"
         expression: "ssl_sni"
-        value: "fw.{{ base_domain }}"
+        ssl_sni: "fw.{{ base_domain }}"
         description: "SNI: fw.{{ base_domain }} — managed by Ansible"
     status_code: [200]
   delegate_to: localhost
   when: "'sni_fw' not in (_hp_acls | dict2items | map(attribute='value.name') | list)"
   tags: [opnsense, opnsense-haproxy]
 
-- name: Refresh after ACL creation
+# =================================================================
+# REPAIR: fix existing sni_ ACLs created with "value: <hostname>"
+#         instead of "ssl_sni: <hostname>". These produce
+#         "CONDITION INVALID / ERROR: missing parameters" in the
+#         generated config and prevent HAProxy from starting.
+#         Idempotent: only fires when ssl_sni field is empty but
+#         the value field (populated by the wrong original call)
+#         contains the hostname we need.
+# =================================================================
+
+- name: Repair existing sni_ ACLs (populate ssl_sni field)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/set_acl/{{ item.key }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      acl:
+        ssl_sni: "{{ item.value.value }}"
+    status_code: [200]
+  delegate_to: localhost
+  loop: >-
+    {{
+      _hp_acls | dict2items
+      | selectattr('value.name', 'match', '^sni_')
+      | selectattr('value.ssl_sni', 'equalto', '')
+      | list
+    }}
+  when: item.value.value | default('') != ''
+  tags: [opnsense, opnsense-haproxy]
+
+- name: Refresh after ACL creation and repair
   ansible.builtin.include_tasks: refresh-normalize.yaml
   tags: [opnsense, opnsense-haproxy]
 
 # =================================================================
 # ACTIONS
+# NOTE: the correct fields for a use_backend action are:
+#   type: "use_backend"       (selects the action type)
+#   use_backend: "<uuid>"     (target backend UUID)
+#   linkedAcls: "<uuid>"      (ACL UUID, comma-separated for multiple)
+#   testType: "if"            (required; "if" or "unless")
 # =================================================================
 
 - name: Create use-backend action for each k3s service
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addAction"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_action"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -300,9 +421,10 @@
       action:
         enabled: "1"
         name: "route_{{ item.name }}"
-        operator: "use_backend"
-        backend: "{{ _k3s_backend_uuid }}"
-        acl: >-
+        testType: "if"
+        type: "use_backend"
+        use_backend: "{{ _k3s_backend_uuid }}"
+        linkedAcls: >-
           {{
             _hp_acls | dict2items
             | selectattr('value.name', 'equalto', 'sni_' + item.name)
@@ -319,7 +441,7 @@
 
 - name: Create use-backend action for fw -> loopback :8444
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addAction"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_action"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -330,9 +452,10 @@
       action:
         enabled: "1"
         name: "route_fw"
-        operator: "use_backend"
-        backend: "{{ _fw_loopback_backend_uuid }}"
-        acl: >-
+        testType: "if"
+        type: "use_backend"
+        use_backend: "{{ _fw_loopback_backend_uuid }}"
+        linkedAcls: >-
           {{
             _hp_acls | dict2items
             | selectattr('value.name', 'equalto', 'sni_fw')
@@ -344,16 +467,53 @@
   when: "'route_fw' not in (_hp_actions | dict2items | map(attribute='value.name') | list)"
   tags: [opnsense, opnsense-haproxy]
 
-- name: Refresh after action creation
+# =================================================================
+# REPAIR: fix existing route_ actions that were created pointing at
+#         the wrong backend (_fw_loopback instead of _k3s_backend).
+#         Idempotent: only fires when the action exists but its
+#         use_backend selection does not match _k3s_backend_uuid.
+# =================================================================
+
+- name: Repair route_ actions pointing at wrong backend
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/set_action/{{ item.key }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      action:
+        use_backend: "{{ _k3s_backend_uuid }}"
+    status_code: [200]
+  delegate_to: localhost
+  # Loop over all route_ actions except route_fw (which correctly targets fw-ssl-loopback).
+  # Fire when the currently-selected use_backend UUID is not the k3s-ingress backend.
+  loop: >-
+    {{
+      _hp_actions | dict2items
+      | selectattr('value.name', 'match', '^route_(?!fw$)')
+      | list
+    }}
+  when: >-
+    (item.value.use_backend | dict2items
+     | selectattr('value.selected', 'equalto', 1)
+     | map(attribute='key') | list | first | default('')) != _k3s_backend_uuid
+  tags: [opnsense, opnsense-haproxy]
+
+- name: Refresh after action creation and repair
   ansible.builtin.include_tasks: refresh-normalize.yaml
   tags: [opnsense, opnsense-haproxy]
 
-- name: Build comma-separated action UUID list for :443 frontend
+# Collect ALL action UUIDs for the :443 frontend.
+# Including every action (route_ AND pre-existing like ACME redirect from os-acme)
+# ensures we never silently drop actions we did not create.
+- name: Build comma-separated action UUID list for :443 frontend (all actions)
   ansible.builtin.set_fact:
     _frontend_action_uuids: >-
       {{
         _hp_actions | dict2items
-        | selectattr('value.name', 'match', '^route_')
         | map(attribute='key') | list | join(',')
       }}
   tags: [opnsense, opnsense-haproxy]
@@ -364,7 +524,7 @@
 
 - name: Create :443 TCP/SNI passthrough frontend
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addFrontend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_frontend"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -385,6 +545,35 @@
     status_code: [200]
   delegate_to: localhost
   when: "'k3s-https' not in (_hp_frontends | dict2items | map(attribute='value.name') | list)"
+  tags: [opnsense, opnsense-haproxy]
+
+# Always update linkedActions on the :443 frontend so that newly added
+# route_ actions (and repairs) are wired in — even when the frontend
+# already exists and the create task above was skipped.
+- name: Look up :443 frontend UUID
+  ansible.builtin.set_fact:
+    _k3s_https_uuid: >-
+      {{
+        _hp_frontends | dict2items
+        | selectattr('value.name', 'equalto', 'k3s-https')
+        | map(attribute='key') | first
+      }}
+  tags: [opnsense, opnsense-haproxy]
+
+- name: Update :443 frontend linkedActions (idempotent)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/set_frontend/{{ _k3s_https_uuid }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      frontend:
+        linkedActions: "{{ _frontend_action_uuids }}"
+    status_code: [200]
+  delegate_to: localhost
   tags: [opnsense, opnsense-haproxy]
 
 - name: Look up fw.{{ base_domain }} cert in OPNsense cert manager (standalone mode)
@@ -415,7 +604,7 @@
 
 - name: Create :8444 HTTPS frontend (TLS termination for fw.{{ base_domain }})
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addFrontend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_frontend"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"
@@ -450,7 +639,7 @@
 
 - name: Create :80 HTTP redirect frontend
   ansible.builtin.uri:
-    url: "{{ opnsense_api_base }}/api/haproxy/settings/addFrontend"
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_frontend"
     method: POST
     url_username: "{{ opnsense_api_key }}"
     url_password: "{{ opnsense_api_secret }}"

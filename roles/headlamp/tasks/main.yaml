@@ -118,7 +118,7 @@
     # ── OPNsense Unbound registration ─────────────────────────────
     - name: Check if Unbound host override for headlamp already exists
       ansible.builtin.uri:
-        url: "https://{{ opnsense_host }}/api/unbound/host_overrides/searchHostOverride"
+        url: "{{ opnsense_api_base }}/api/unbound/settings/search_host_override"
         method: GET
         user: "{{ opnsense_api_key }}"
         password: "{{ opnsense_api_secret }}"
@@ -140,7 +140,7 @@
 
     - name: Add headlamp.{{ base_domain }} Unbound host override
       ansible.builtin.uri:
-        url: "https://{{ opnsense_host }}/api/unbound/host_overrides/addHostOverride"
+        url: "{{ opnsense_api_base }}/api/unbound/settings/add_host_override"
         method: POST
         user: "{{ opnsense_api_key }}"
         password: "{{ opnsense_api_secret }}"
@@ -157,10 +157,10 @@
         status_code: [200, 201]
       delegate_to: localhost
       when: not headlamp_override_exists
-
+    
     - name: Apply Unbound configuration
       ansible.builtin.uri:
-        url: "https://{{ opnsense_host }}/api/unbound/service/reconfigure"
+        url: "{{ opnsense_api_base }}/api/unbound/service/reconfigure"
         method: POST
         user: "{{ opnsense_api_key }}"
         password: "{{ opnsense_api_secret }}"

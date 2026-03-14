@@ -95,7 +95,7 @@
 # ── Phase 8: Headlamp dashboard ───────────────────────────────────
 - name: Install Headlamp dashboard
   hosts: k3s_init
-  become: true
+  # become: true
   gather_facts: false
   tags: [dashboard]
   vars_files:

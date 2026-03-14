@@ -1,0 +1,103 @@
+---
+# roles/opnsense-unbound/tasks/main.yaml
+#
+# Registers a single service into the OPNsense stack:
+#   1. Unbound host override   (always)
+#
+# Expects variable: service (dict) — see defaults/main.yaml for schema.
+# All tasks delegate_to: localhost.
+# Tags: register-dns
+
+- name: Validate required service fields
+  ansible.builtin.assert:
+    that:
+      - arecord.name is defined
+      - arecord.fqdn is defined
+    fail_msg: "arecord.name, arecord.ip, and arecord.fqdn are all required."
+  tags: [register-dns]
+
+- name: Set service fact defaults
+  ansible.builtin.set_fact:
+    _arec_name: "{{ arecord.name }}"
+    _arec_fqdn: "{{ arecord.fqdn }}"
+    _arec_ip: "{{ arecord.ip | default(opnsense_lan_ip) }}"
+    _arec_domain: "{{ arecord.domain | default(base_domain) }}"
+  tags: [register-dns]
+
+- name: Get existing Unbound host overrides
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/unbound/settings/search_host_override"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: _unbound_existing
+  delegate_to: localhost
+  tags: [register-dns]
+
+- name: Store matching records as facts
+  ansible.builtin.set_fact:
+    _found: |-
+      {{ _unbound_existing.json.rows 
+         | selectattr('hostname', 'equalto', _arec_name)
+         | selectattr('domain', 'equalto', _arec_domain)  }}
+    _match: |-
+      {{ _unbound_existing.json.rows 
+         | selectattr('hostname', 'equalto', _arec_name)
+         | selectattr('domain', 'equalto', _arec_domain)
+         | selectattr('server', 'equalto', _arec_ip)
+         | first  }}
+
+- name: Delete Duplicate(d) records for {{ _arec_fqdn }}
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/unbound/settings/del_host_override"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [200, 201]
+    body:
+      host:
+        uuid: "{{ _i.uuid }}"
+  delegate_to: localhost
+  loop: "{{ _found }}"
+  loop_control: 
+    loop_var: _i
+  when: |-
+    ((_found | length > 1) and (_i != _match)) or 
+    ((_found | length > 0) and (_match | length == 0))
+  tags: [register-dns]
+  notify: Apply Unbound configuration
+
+ 
+- name: Register {{ _arec_name }} in Unbound
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/unbound/settings/add_host_override"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      host:
+        enabled: "1"
+        hostname: "{{ _arec_name }}"
+        domain: "{{ _arec_domain }}"
+        server: "{{ _arec_ip }}"
+        description: "{{ _arec_fqdn }} — managed by Ansible"
+    status_code: [200, 201]
+  delegate_to: localhost
+  vars: 
+    _found: |-
+      {{ _unbound_existing.json.rows 
+         | selectattr('hostname', 'equalto', _arec_name)
+         | selectattr('domain', 'equalto', '_arec_domain') }}
+  when: (_found | length==0) or _found.server != _arec_ip
+  tags: [register-dns]
+  notify: Apply Unbound configuration
+
+- meta: flush_handlers
