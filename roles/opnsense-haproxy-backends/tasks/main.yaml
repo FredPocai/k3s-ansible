@@ -1,0 +1,219 @@
+---
+# roles/opnsense-haproxy-backends/tasks/main.yaml
+#
+# Ensures the following HAProxy backend pools exist with correct settings.
+#
+# Strategy: DELETE and recreate any backend whose mode doesn't match.
+# The OPNsense API silently ignores set_backend mode changes on existing
+# objects — delete + recreate is the only reliable way to change mode.
+#
+# Backends managed:
+#   k3s-ingress      TCP  roundrobin  k3s211/212/213:443
+#   fw-ssl-loopback  TCP  roundrobin  127.0.0.1:8444
+#   opnsense-gui     HTTP roundrobin  127.0.0.1:8080
+#
+# Tags: opnsense, haproxy-backends
+
+- name: Fetch current HAProxy config
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+  register: _hp_get
+  delegate_to: localhost
+  tags: [opnsense, haproxy-backends]
+
+- name: Build server and backend item lists
+  ansible.builtin.set_fact:
+    _server_items: >-
+      {{ _hp_get.json.haproxy.servers.server | default({}) | dict2items }}
+    _backend_items: >-
+      {{ _hp_get.json.haproxy.backends.backend | default({}) | dict2items }}
+  tags: [opnsense, haproxy-backends]
+
+# Resolve server UUIDs using selectattr — no zip/dict/items2dict complexity
+- name: Resolve server UUIDs by name
+  ansible.builtin.set_fact:
+    _k3s_server_uuids: >-
+      {{
+        k3s_nodes | map(attribute='name')
+        | map('extract',
+            dict(
+              _server_items | map(attribute='value.name') | list
+              | zip(_server_items | map(attribute='key') | list) | list
+            )
+          )
+        | select('string') | list | join(',')
+      }}
+    _fw_loopback_server_uuid: >-
+      {{
+        (_server_items
+        | selectattr('value.name', 'equalto', 'fw-ssl-loopback')
+        | map(attribute='key') | list | first) | default('')
+      }}
+    _opnsense_gui_server_uuid: >-
+      {{
+        (_server_items
+        | selectattr('value.name', 'equalto', 'opnsense-gui')
+        | map(attribute='key') | list | first) | default('')
+      }}
+  tags: [opnsense, haproxy-backends]
+
+# ── Delete backends that exist in the wrong mode ──────────────────
+
+- name: Delete k3s-ingress backend if in wrong mode (http instead of tcp)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/del_backend/{{ item.key }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+  loop: >-
+    {{
+      _backend_items
+      | selectattr('value.name', 'equalto', 'k3s-ingress')
+      | selectattr('value.mode.tcp.selected', 'equalto', 0)
+      | list
+    }}
+  delegate_to: localhost
+  tags: [opnsense, haproxy-backends]
+
+- name: Delete fw-ssl-loopback backend if in wrong mode (http instead of tcp)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/del_backend/{{ item.key }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+  loop: >-
+    {{
+      _backend_items
+      | selectattr('value.name', 'equalto', 'fw-ssl-loopback')
+      | selectattr('value.mode.tcp.selected', 'equalto', 0)
+      | list
+    }}
+  delegate_to: localhost
+  tags: [opnsense, haproxy-backends]
+
+# ── Refetch after any deletes ─────────────────────────────────────
+
+- name: Refetch HAProxy config after deletes
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+  register: _hp_get
+  delegate_to: localhost
+  tags: [opnsense, haproxy-backends]
+
+- name: Rebuild backend name list after deletes
+  ansible.builtin.set_fact:
+    _existing_backends: >-
+      {{
+        _hp_get.json.haproxy.backends.backend
+        | default({}) | dict2items
+        | map(attribute='value.name') | list
+      }}
+  tags: [opnsense, haproxy-backends]
+
+# ── Create backends ───────────────────────────────────────────────
+
+- name: Create k3s-ingress backend (TCP, roundrobin)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_backend"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      backend:
+        enabled: "1"
+        name: "k3s-ingress"
+        mode: "tcp"
+        algorithm: "roundrobin"
+        linkedServers: "{{ _k3s_server_uuids }}"
+        http2Enabled: "0"
+        http2Enabled_nontls: "0"
+        description: "k3s ingress nodes — managed by Ansible"
+    status_code: [200]
+  when: "'k3s-ingress' not in _existing_backends"
+  delegate_to: localhost
+  tags: [opnsense, haproxy-backends]
+
+- name: Create fw-ssl-loopback backend (TCP, roundrobin)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_backend"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      backend:
+        enabled: "1"
+        name: "fw-ssl-loopback"
+        mode: "tcp"
+        algorithm: "roundrobin"
+        linkedServers: "{{ _fw_loopback_server_uuid }}"
+        http2Enabled: "0"
+        http2Enabled_nontls: "0"
+        description: "Default fallback — loopback to fw :8444 — managed by Ansible"
+    status_code: [200]
+  when: "'fw-ssl-loopback' not in _existing_backends"
+  delegate_to: localhost
+  tags: [opnsense, haproxy-backends]
+
+- name: Create opnsense-gui backend (HTTP, roundrobin)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_backend"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      backend:
+        enabled: "1"
+        name: "opnsense-gui"
+        mode: "http"
+        algorithm: "roundrobin"
+        linkedServers: "{{ _opnsense_gui_server_uuid }}"
+        description: "OPNsense GUI :8080 — managed by Ansible"
+    status_code: [200]
+  when: "'opnsense-gui' not in _existing_backends"
+  delegate_to: localhost
+  tags: [opnsense, haproxy-backends]
+
+# ── apply ─────────────────────────────────────────────────────────
+
+- name: Apply HAProxy configuration
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/service/reconfigure"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+  delegate_to: localhost
+  tags: [opnsense, haproxy-backends]

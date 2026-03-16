@@ -1,0 +1,59 @@
+cd ---
+# roles/prereqs/tasks/network-netplan.yml
+# Static network configuration for Debian/Ubuntu via netplan.
+# Called from main.yml when ansible_os_family == 'Debian'.
+#
+# Both interfaces are configured statically. DHCP is disabled on both
+# to prevent DHCP-advertised DNS servers from leaking into systemd-resolved
+# and subsequently into pod DNS config via CoreDNS.
+#
+# IPv6 is left as-is (SLAAC via RA) on the primary interface — no changes to IPv6.
+# The storage interface is IPv4-only; no IPv6 needed on the storage network.
+
+- name: Remove legacy 70-dnssuffix.yaml if present
+  ansible.builtin.file:
+    path: /etc/netplan/70-dnssuffix.yaml
+    state: absent
+  notify: Apply netplan
+
+- name: Remove legacy 60-storage.yaml if present
+  ansible.builtin.file:
+    path: /etc/netplan/60-storage.yaml
+    state: absent
+  notify: Apply netplan
+
+- name: Configure static IPv4 on both interfaces via netplan
+  ansible.builtin.copy:
+    dest: /etc/netplan/60-k3s-static.yaml
+    mode: "0600"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          {{ k3s_iface }}:
+            dhcp4: false
+            dhcp6: false
+            accept-ra: true
+            addresses:
+              - {{ k3s_static_ip }}/24
+            routes:
+              - to: default
+                via: {{ k3s_gateway }}
+            nameservers:
+              addresses:
+                - {{ opnsense_host }}
+              search: []
+          {{ storage_iface }}:
+            dhcp4: false
+            dhcp6: false
+            accept-ra: false
+            addresses:
+              - {{ k3s_storage_ip }}/24
+            nameservers:
+              addresses:
+                - {{ opnsense_host }}
+              search: []
+  notify: Apply netplan
+
+- name: Flush handlers (apply netplan immediately)
+  ansible.builtin.meta: flush_handlers

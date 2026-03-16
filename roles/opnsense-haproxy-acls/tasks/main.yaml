@@ -1,0 +1,109 @@
+---
+# roles/opnsense-haproxy-acls/tasks/main.yaml
+#
+# Ensures SNI ACLs exist for each k3s_service entry.
+# ACL name: sni_<service.name>   matches: <service.hostname>
+#
+# Confirmed working field names from live API:
+#   expression: "ssl_sni"
+#   ssl_sni: "<hostname>"      ← expression-specific field, NOT "value"
+#
+# Tags: opnsense, haproxy-acls
+
+- name: Fetch current HAProxy config
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+  register: _hp_get
+  delegate_to: localhost
+  tags: [opnsense, haproxy-acls]
+
+- name: Build existing ACL name list
+  ansible.builtin.set_fact:
+    _existing_acls: >-
+      {{
+        _hp_get.json.haproxy.acls.acl
+        | default({}) | dict2items
+        | map(attribute='value.name') | list
+      }}
+  tags: [opnsense, haproxy-acls]
+
+- name: Create SNI ACL for each k3s service
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_acl"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      acl:
+        enabled: "1"
+        name: "sni_{{ item.name }}"
+        expression: "ssl_sni"
+        ssl_sni: "{{ item.hostname }}"
+        description: "SNI: {{ item.hostname }} — managed by Ansible"
+    status_code: [200]
+  loop: "{{ k3s_services }}"
+  when: "'sni_' + item.name not in _existing_acls"
+  delegate_to: localhost
+  tags: [opnsense, haproxy-acls]
+
+# ── Repair: fix ACLs that exist but have empty ssl_sni ────────────
+# Caused by earlier runs that used "value" instead of "ssl_sni".
+# Those produce "CONDITION INVALID" in the generated config.
+
+- name: Refetch after ACL creation
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+  register: _hp_get
+  delegate_to: localhost
+  tags: [opnsense, haproxy-acls]
+
+- name: Repair sni_ ACLs with empty ssl_sni field
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/set_acl/{{ item.key }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      acl:
+        ssl_sni: "{{ item.value.value }}"
+    status_code: [200]
+  loop: >-
+    {{
+      _hp_get.json.haproxy.acls.acl | default({}) | dict2items
+      | selectattr('value.name', 'match', '^sni_')
+      | selectattr('value.ssl_sni', 'equalto', '')
+      | list
+    }}
+  when: item.value.value | default('') != ''
+  delegate_to: localhost
+  tags: [opnsense, haproxy-acls]
+
+- name: Apply HAProxy configuration
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/service/reconfigure"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+  delegate_to: localhost
+  tags: [opnsense, haproxy-acls]

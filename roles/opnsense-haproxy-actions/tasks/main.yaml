@@ -1,0 +1,159 @@
+---
+# roles/opnsense-haproxy-actions/tasks/main.yaml
+#
+# Ensures use-backend actions exist for each k3s_service.
+# Action name: route_<service.name>
+# Wires: sni_<service.name> ACL → k3s-ingress backend
+#
+# Confirmed working field names from live settings/get:
+#   testType: "if"
+#   type: "use_backend"
+#   use_backend: "<uuid>"
+#   linkedAcls: "<uuid>"
+#
+# Tags: opnsense, haproxy-actions
+
+- name: Fetch current HAProxy config
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+  register: _hp_get
+  delegate_to: localhost
+  tags: [opnsense, haproxy-actions]
+
+- name: Build item lists for ACLs, backends, and actions
+  ansible.builtin.set_fact:
+    _acl_items: >-
+      {{ _hp_get.json.haproxy.acls.acl | default({}) | dict2items }}
+    _backend_items: >-
+      {{ _hp_get.json.haproxy.backends.backend | default({}) | dict2items }}
+    _action_items: >-
+      {{ _hp_get.json.haproxy.actions.action | default({}) | dict2items }}
+    _existing_actions: >-
+      {{
+        _hp_get.json.haproxy.actions.action
+        | default({}) | dict2items
+        | map(attribute='value.name') | list
+      }}
+  tags: [opnsense, haproxy-actions]
+
+- name: Resolve k3s-ingress backend UUID
+  ansible.builtin.set_fact:
+    _k3s_backend_uuid: >-
+      {{
+        (_backend_items
+        | selectattr('value.name', 'equalto', 'k3s-ingress')
+        | map(attribute='key') | list | first) | default('')
+      }}
+  tags: [opnsense, haproxy-actions]
+
+- name: Fail if k3s-ingress backend not found
+  ansible.builtin.fail:
+    msg: "k3s-ingress backend not found — run haproxy-backends role first"
+  when: _k3s_backend_uuid == ''
+  tags: [opnsense, haproxy-actions]
+
+# ── Delete actions that point at the wrong backend ────────────────
+# Earlier buggy runs created route_* actions targeting fw-ssl-loopback.
+
+- name: Delete misconfigured route_ actions (wrong backend UUID)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/del_action/{{ item.key }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+  loop: >-
+    {{
+      _action_items
+      | selectattr('value.name', 'match', '^route_(?!fw$)')
+      | rejectattr('value.use_backend.' + _k3s_backend_uuid + '.selected',
+                   'defined')
+      | list
+    }}
+  delegate_to: localhost
+  tags: [opnsense, haproxy-actions]
+
+# ── Refetch after deletes ─────────────────────────────────────────
+
+- name: Refetch HAProxy config after action deletes
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+  register: _hp_get
+  delegate_to: localhost
+  tags: [opnsense, haproxy-actions]
+
+- name: Rebuild ACL items and existing action name list after deletes
+  ansible.builtin.set_fact:
+    _acl_items: >-
+      {{ _hp_get.json.haproxy.acls.acl | default({}) | dict2items }}
+    _existing_actions: >-
+      {{
+        _hp_get.json.haproxy.actions.action
+        | default({}) | dict2items
+        | map(attribute='value.name') | list
+      }}
+  tags: [opnsense, haproxy-actions]
+
+# ── Create actions ────────────────────────────────────────────────
+
+- name: Create use-backend action for each k3s service
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_action"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      action:
+        enabled: "1"
+        name: "route_{{ item.name }}"
+        testType: "if"
+        type: "use_backend"
+        use_backend: "{{ _k3s_backend_uuid }}"
+        linkedAcls: >-
+          {{
+            (_acl_items
+            | selectattr('value.name', 'equalto', 'sni_' + item.name)
+            | map(attribute='key') | list | first) | default('')
+          }}
+        description: "Route {{ item.hostname }} → k3s — managed by Ansible"
+    status_code: [200]
+  loop: "{{ k3s_services }}"
+  when:
+    - "'route_' + item.name not in _existing_actions"
+    - >-
+        (_acl_items
+        | selectattr('value.name', 'equalto', 'sni_' + item.name)
+        | list | length) > 0
+  delegate_to: localhost
+  tags: [opnsense, haproxy-actions]
+
+- name: Apply HAProxy configuration
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/service/reconfigure"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+  delegate_to: localhost
+  tags: [opnsense, haproxy-actions]

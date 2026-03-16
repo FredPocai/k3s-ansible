@@ -1,0 +1,136 @@
+---
+# roles/opnsense-haproxy-servers/tasks/main.yaml
+#
+# Ensures the following HAProxy server objects exist:
+#   - k3s211 / k3s212 / k3s213  (k3s ingress nodes, :443, ssl, no verify)
+#   - fw-ssl-loopback             (127.0.0.1:8444, no ssl)
+#   - opnsense-gui                (127.0.0.1:8080, no ssl)
+#
+# Strategy: fetch current server names, create only those missing.
+# Does NOT delete servers — removal is manual (safe default).
+#
+# Confirmed API field names from live settings/get:
+#   address, port, checkport, mode (active/backup/disabled),
+#   ssl ("0"/"1"), sslVerify ("0"/"1"), description
+#
+# Tags: opnsense, haproxy-servers
+
+- name: Fetch current HAProxy servers
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/get"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+  register: _hp_get
+  delegate_to: localhost
+  tags: [opnsense, haproxy-servers]
+
+- name: Set existing server name list
+  ansible.builtin.set_fact:
+    _existing_servers: >-
+      {{
+        _hp_get.json.haproxy.servers.server
+        | default({}) | dict2items
+        | map(attribute='value.name') | list
+      }}
+  tags: [opnsense, haproxy-servers]
+
+# ── k3s ingress nodes ─────────────────────────────────────────────
+
+- name: Create k3s ingress server entries
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_server"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      server:
+        enabled: "1"
+        name: "{{ item.name }}"
+        address: "{{ item.ip }}"
+        port: "443"
+        checkport: "443"
+        mode: "active"
+        ssl: "1"
+        sslVerify: "0"
+        description: "k3s ingress node — managed by Ansible"
+    status_code: [200]
+  loop: "{{ k3s_nodes }}"
+  when: item.name not in _existing_servers
+  delegate_to: localhost
+  tags: [opnsense, haproxy-servers]
+
+# ── fw-ssl-loopback ───────────────────────────────────────────────
+
+- name: Create fw-ssl-loopback server
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_server"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      server:
+        enabled: "1"
+        name: "fw-ssl-loopback"
+        address: "127.0.0.1"
+        port: "8444"
+        checkport: "8444"
+        mode: "active"
+        ssl: "0"
+        sslVerify: "0"
+        description: "Loopback to fw HTTPS frontend :8444 — managed by Ansible"
+    status_code: [200]
+  when: "'fw-ssl-loopback' not in _existing_servers"
+  delegate_to: localhost
+  tags: [opnsense, haproxy-servers]
+
+# ── opnsense-gui ──────────────────────────────────────────────────
+
+- name: Create opnsense-gui server
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/add_server"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      server:
+        enabled: "1"
+        name: "opnsense-gui"
+        address: "127.0.0.1"
+        port: "8080"
+        checkport: "8080"
+        mode: "active"
+        ssl: "0"
+        sslVerify: "0"
+        description: "OPNsense GUI HTTP — managed by Ansible"
+    status_code: [200]
+  when: "'opnsense-gui' not in _existing_servers"
+  delegate_to: localhost
+  tags: [opnsense, haproxy-servers]
+
+# ── apply ─────────────────────────────────────────────────────────
+
+- name: Apply HAProxy configuration
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/service/reconfigure"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+    status_code: [200]
+  delegate_to: localhost
+  tags: [opnsense, haproxy-servers]

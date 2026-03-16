@@ -10,7 +10,8 @@
 # Tags:
 #   prereqs, k3s, calico, cert-manager, longhorn, ingress, dashboard
 #   local-path, cnpg, authentik
-#   opnsense, opnsense-plugins, opnsense-acme, opnsense-haproxy, opnsense-ddclient
+#   opnsense, opnsense-plugins, opnsense-acme, opnsense-ddclient
+#   haproxy-servers, haproxy-backends, haproxy-acls, haproxy-actions, haproxy-frontends
 #   register-service
 #
 # Vault: copy vault/secrets.example.yaml -> vault/secrets.yaml, fill in values, then encrypt:
@@ -95,7 +96,6 @@
 # ── Phase 8: Headlamp dashboard ───────────────────────────────────
 - name: Install Headlamp dashboard
   hosts: k3s_init
-  # become: true
   gather_facts: false
   tags: [dashboard]
   vars_files:
@@ -120,7 +120,6 @@
 # roles (authentik, librenms, etc.) using roles/cnpg/templates/cluster.yaml.j2.
 - name: Install CloudNativePG operator
   hosts: k3s_init
-  # become: true
   gather_facts: false
   tags: [cnpg]
   roles:
@@ -134,7 +133,6 @@
 #                     authentik_bootstrap_email, authentik_bootstrap_password
 - name: Install Authentik IdP
   hosts: k3s_init
-  # become: true
   gather_facts: false
   tags: [authentik]
   vars_files:
@@ -143,8 +141,6 @@
     - authentik
 
 # ── Phase 12: OPNsense — plugin install ──────────────────────────
-# Installs os-haproxy and os-acme-client; removes stale plugin stubs.
-# Safe to re-run.
 - name: Install OPNsense plugins (os-haproxy, os-acme-client)
   hosts: k3s_init
   become: false
@@ -166,18 +162,72 @@
   roles:
     - opnsense-acme
 
-# ── Phase 14: OPNsense — HAProxy ─────────────────────────────────
-- name: Configure OPNsense HAProxy
+# ── Phase 14: OPNsense — HAProxy servers ─────────────────────────
+# Creates k3s node server entries, fw-ssl-loopback, opnsense-gui.
+# Safe to re-run — only creates missing objects.
+- name: Configure OPNsense HAProxy servers
   hosts: k3s_init
   become: false
   gather_facts: false
-  tags: [opnsense, opnsense-haproxy]
+  tags: [opnsense, haproxy-servers]
   vars_files:
     - vault/secrets.yaml
   roles:
-    - opnsense-haproxy
+    - opnsense-haproxy-servers
 
-# ── Phase 15: OPNsense — ddclient (Dynamic DNS) ──────────────────
+# ── Phase 15: OPNsense — HAProxy backends ────────────────────────
+# Creates k3s-ingress (TCP), fw-ssl-loopback (TCP), opnsense-gui (HTTP).
+# Deletes and recreates any backend that exists in the wrong mode.
+- name: Configure OPNsense HAProxy backends
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, haproxy-backends]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - opnsense-haproxy-backends
+
+# ── Phase 16: OPNsense — HAProxy ACLs ────────────────────────────
+# Creates sni_<name> ACLs for each entry in k3s_services.
+- name: Configure OPNsense HAProxy ACLs
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, haproxy-acls]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - opnsense-haproxy-acls
+
+# ── Phase 17: OPNsense — HAProxy actions ─────────────────────────
+# Creates route_<name> use-backend actions for each k3s_service.
+# Removes any route_ action pointing at the wrong backend.
+- name: Configure OPNsense HAProxy actions
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, haproxy-actions]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - opnsense-haproxy-actions
+
+# ── Phase 18: OPNsense — HAProxy frontends ───────────────────────
+# Creates/repairs k3s-https (:443 TCP), http-redirect (:80), fw-https (:8444).
+# Deletes and recreates k3s-https if it exists in the wrong mode.
+# Always updates linkedActions so new services are wired in.
+- name: Configure OPNsense HAProxy frontends
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, haproxy-frontends]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - opnsense-haproxy-frontends
+
+# ── Phase 19: OPNsense — ddclient (Dynamic DNS) ──────────────────
 - name: Configure OPNsense ddclient (DynDNS)
   hosts: k3s_init
   become: false
@@ -189,7 +239,7 @@
     - role: opnsense-ddclient
       when: opnsense_ddns_hosts | default([]) | length > 0
 
-# ── Phase 16: OPNsense — register-service ────────────────────────
+# ── Phase 20: OPNsense — register-service ────────────────────────
 # Not run during full deploy — invoke explicitly with --tags register-service.
 #
 # Examples:

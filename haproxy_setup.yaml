@@ -1,0 +1,85 @@
+---
+# haproxy_setup.yaml — configure OPNsense HAProxy from scratch
+#
+# Runs all five HAProxy roles in dependency order.
+# Safe to re-run at any time — wrong-mode objects are deleted and recreated,
+# missing objects are created, correct objects are left alone.
+#
+# Usage:
+#   # Full setup (all five phases):
+#   ansible-playbook -i inventory/hosts.yaml haproxy_setup.yaml --ask-vault-pass
+#
+#   # Single phase (e.g. just fix frontends):
+#   ansible-playbook -i inventory/hosts.yaml haproxy_setup.yaml \
+#     --tags haproxy-frontends --ask-vault-pass
+#
+#   # Wire in new services after updating k3s_services in group_vars:
+#   ansible-playbook -i inventory/hosts.yaml haproxy_setup.yaml \
+#     --tags haproxy-acls,haproxy-actions,haproxy-frontends --ask-vault-pass
+#
+# Prerequisites:
+#   - os-haproxy plugin installed (run opnsense-plugins role or Phase 12 of site.yaml)
+#   - os-acme-client configured and fw cert issued (Phase 13 of site.yaml)
+#   - k3s_nodes and k3s_services defined in group_vars
+#
+# Phase order matters — each phase depends on objects created by the prior one:
+#   servers → backends → acls → actions → frontends
+
+- name: Load vault secrets
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Include vault secrets
+      ansible.builtin.include_vars:
+        file: vault/secrets.yaml
+      tags: always
+
+- name: HAProxy — servers
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, haproxy-servers]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - opnsense-haproxy-servers
+
+- name: HAProxy — backends
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, haproxy-backends]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - opnsense-haproxy-backends
+
+- name: HAProxy — ACLs
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, haproxy-acls]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - opnsense-haproxy-acls
+
+- name: HAProxy — actions
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, haproxy-actions]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - opnsense-haproxy-actions
+
+- name: HAProxy — frontends
+  hosts: k3s_init
+  become: false
+  gather_facts: false
+  tags: [opnsense, haproxy-frontends]
+  vars_files:
+    - vault/secrets.yaml
+  roles:
+    - opnsense-haproxy-frontends
