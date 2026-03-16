@@ -56,7 +56,7 @@
         port: "443"
         checkport: "443"
         mode: "active"
-        ssl: "1"
+        ssl: "0"
         sslVerify: "0"
         description: "k3s ingress node — managed by Ansible"
     status_code: [200]
@@ -76,7 +76,7 @@
     body_format: json
     body:
       server:
-        ssl: "1"
+        ssl: "0"
         sslVerify: "0"
     status_code: [200]
   delegate_to: localhost

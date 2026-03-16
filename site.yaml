@@ -26,6 +26,7 @@
       ansible.builtin.include_vars:
         file: vault/secrets.yaml
       tags: always
+  no_log: true
 
 # ── Phase 1: System prerequisites (all nodes in parallel) ─────────
 - name: Prepare all nodes
