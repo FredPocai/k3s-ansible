@@ -56,7 +56,7 @@
         port: "443"
         checkport: "443"
         mode: "active"
-        ssl: "1"
+        ssl: "0"
         sslVerify: "0"
         description: "k3s ingress node — managed by Ansible"
     status_code: [200]
@@ -64,6 +64,34 @@
   when: item.name not in _existing_servers
   delegate_to: localhost
   tags: [opnsense, haproxy-servers]
+
+- name: Patch k3s server SSL settings (enforce sslVerify=0 on existing entries)
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_base }}/api/haproxy/settings/set_server/{{ _srv_uuid }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      server:
+        ssl: "0"
+        sslVerify: "0"
+    status_code: [200]
+  delegate_to: localhost
+  loop: "{{ k3s_nodes }}"
+  vars:
+    _srv_uuid: >-
+      {{
+        _hp_get.json.haproxy.servers.server
+        | default({}) | dict2items
+        | selectattr('value.name', 'equalto', item.name)
+        | map(attribute='key') | first | default('')
+      }}
+  when: _srv_uuid != ''
+  tags: [opnsense, haproxy-servers]
+ 
 
 # ── fw-ssl-loopback ───────────────────────────────────────────────
 
