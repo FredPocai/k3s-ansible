@@ -3,16 +3,38 @@
 # Installs Headlamp via Helm using a rendered values.yaml.
 # Registers headlamp.{{ base_domain }} in OPNsense Unbound for split-horizon DNS.
 #
-# Note: kubernetes/dashboard was archived Jan 2026. Headlamp is the replacement.
+# OIDC mode (default when authentik_bootstrap_token is in vault):
+#   - Creates Authentik OIDC provider + application
+#   - Injects OIDC kube-apiserver-args into k3s on all nodes
+#   - Creates ClusterRoleBinding for headlamp_oidc_admin_group
+#   - Headlamp values: OIDC config, no htpasswd basic auth
 #
-# Access: https://headlamp.{{ base_domain }}
-# Retrieve login token:
+# Basic-auth fallback (when authentik_bootstrap_token is absent):
+#   - Headlamp values: nginx basic auth via htpasswd Secret
+#
+# Retrieve login token (token-mode still works alongside OIDC):
 #   kubectl get secret headlamp-admin-token -n headlamp \
 #     -o jsonpath='{.data.token}' | base64 -d
+#
+# Note: kubernetes/dashboard was archived Jan 2026. Headlamp is the replacement.
 
 - name: Only run Headlamp install from init node
   when: inventory_hostname in groups['k3s_init']
   block:
+
+    # ── OIDC pre-flight (Authentik must already be deployed) ───────
+    # Configure Authentik before deploying Headlamp so the Helm values
+    # that reference the OIDC issuer are correct on first install.
+
+    - name: Configure Authentik OIDC provider for Headlamp
+      ansible.builtin.include_tasks: authentik-oidc.yaml
+      when: headlamp_oidc_enabled | bool
+
+    - name: Configure k3s OIDC args and ClusterRoleBinding
+      ansible.builtin.include_tasks: k3s-oidc.yaml
+      when: headlamp_oidc_enabled | bool
+
+    # ── Helm deploy ────────────────────────────────────────────────
 
     - name: Add Headlamp Helm repo
       ansible.builtin.command: helm repo add headlamp https://kubernetes-sigs.github.io/headlamp/
@@ -36,12 +58,20 @@
     - name: Deploy Headlamp via Helm
       ansible.builtin.command: >
         helm upgrade --install headlamp headlamp/headlamp
-        --namespace headlamp
+        --namespace {{ headlamp_namespace }}
         --create-namespace
         -f /tmp/headlamp-values.yaml
         --wait --timeout 5m
       environment:
         KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Clean up rendered values file
+      ansible.builtin.file:
+        path: /tmp/headlamp-values.yaml
+        state: absent
+
+    # ── Admin ServiceAccount, ClusterRoleBinding, and long-lived token
+    # This SA token is used for token-mode login (still valid alongside OIDC).
 
     - name: Apply Headlamp admin ServiceAccount, ClusterRoleBinding, and token Secret
       ansible.builtin.shell: |
@@ -50,7 +80,7 @@
         kind: ServiceAccount
         metadata:
           name: headlamp-admin
-          namespace: headlamp
+          namespace: {{ headlamp_namespace }}
         ---
         apiVersion: rbac.authorization.k8s.io/v1
         kind: ClusterRoleBinding
@@ -63,7 +93,7 @@
         subjects:
           - kind: ServiceAccount
             name: headlamp-admin
-            namespace: headlamp
+            namespace: {{ headlamp_namespace }}
         ---
         apiVersion: rbac.authorization.k8s.io/v1
         kind: ClusterRoleBinding
@@ -76,13 +106,13 @@
         subjects:
           - kind: ServiceAccount
             name: headlamp
-            namespace: headlamp
+            namespace: {{ headlamp_namespace }}
         ---
         apiVersion: v1
         kind: Secret
         metadata:
           name: headlamp-admin-token
-          namespace: headlamp
+          namespace: {{ headlamp_namespace }}
           annotations:
             kubernetes.io/service-account.name: headlamp-admin
         type: kubernetes.io/service-account-token
@@ -94,7 +124,7 @@
 
     - name: Wait for headlamp-admin-token to be populated
       ansible.builtin.command: >
-        kubectl get secret headlamp-admin-token -n headlamp
+        kubectl get secret headlamp-admin-token -n {{ headlamp_namespace }}
         -o jsonpath='{.data.token}'
       environment:
         KUBECONFIG: /etc/rancher/k3s/k3s.yaml
@@ -104,9 +134,9 @@
       delay: 5
       changed_when: false
 
-    - name: Decode login token
+    - name: Decode fallback login token
       ansible.builtin.shell: >
-        kubectl get secret headlamp-admin-token -n headlamp
+        kubectl get secret headlamp-admin-token -n {{ headlamp_namespace }}
         -o jsonpath='{.data.token}' | base64 -d
       args:
         executable: /bin/bash
@@ -116,12 +146,13 @@
       changed_when: false
 
     # ── OPNsense Unbound registration ─────────────────────────────
+
     - name: Check if Unbound host override for headlamp already exists
       ansible.builtin.uri:
         url: "{{ opnsense_api_base }}/api/unbound/settings/search_host_override"
         method: GET
-        user: "{{ opnsense_api_key }}"
-        password: "{{ opnsense_api_secret }}"
+        url_username: "{{ opnsense_api_key }}"
+        url_password: "{{ opnsense_api_secret }}"
         force_basic_auth: true
         validate_certs: false
         return_content: true
@@ -142,8 +173,8 @@
       ansible.builtin.uri:
         url: "{{ opnsense_api_base }}/api/unbound/settings/add_host_override"
         method: POST
-        user: "{{ opnsense_api_key }}"
-        password: "{{ opnsense_api_secret }}"
+        url_username: "{{ opnsense_api_key }}"
+        url_password: "{{ opnsense_api_secret }}"
         force_basic_auth: true
         validate_certs: false
         body_format: json
@@ -152,18 +183,18 @@
             enabled: "1"
             hostname: headlamp
             domain: "{{ base_domain }}"
-            server: "{{ haproxy_vip | default(k3s_init_ip) }}"
+            server: "{{ opnsense_lan_ip }}"
             description: "headlamp k3s dashboard — managed by Ansible"
         status_code: [200, 201]
       delegate_to: localhost
       when: not headlamp_override_exists
-    
+
     - name: Apply Unbound configuration
       ansible.builtin.uri:
         url: "{{ opnsense_api_base }}/api/unbound/service/reconfigure"
         method: POST
-        user: "{{ opnsense_api_key }}"
-        password: "{{ opnsense_api_secret }}"
+        url_username: "{{ opnsense_api_key }}"
+        url_password: "{{ opnsense_api_secret }}"
         force_basic_auth: true
         validate_certs: false
         body_format: json
@@ -172,21 +203,30 @@
       delegate_to: localhost
       when: not headlamp_override_exists
 
-    - name: Clean up rendered values file
-      ansible.builtin.file:
-        path: /tmp/headlamp-values.yaml
-        state: absent
+    # ── Summary ───────────────────────────────────────────────────
 
     - name: Print Headlamp access info
       ansible.builtin.debug:
-        msg:
-          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          - "  Headlamp is ready."
-          - "  URL:    https://headlamp.{{ base_domain }}"
-          - "  DNS:    headlamp.{{ base_domain }} → {{ haproxy_vip | default(k3s_init_ip) }} (Unbound)"
-          - "  Login:  select 'Token' and paste:"
-          - "  {{ headlamp_token.stdout }}"
-          - "  Retrieve later:"
-          - "  kubectl get secret headlamp-admin-token -n headlamp \\"
-          - "    -o jsonpath='{.data.token}' | base64 -d"
-          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        msg: >-
+          {{
+            [
+              "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+              "  Headlamp is ready.",
+              "  URL    : https://" + headlamp_hostname,
+              "  Auth   : " + ("OIDC via Authentik (" + authentik_hostname + ")" if headlamp_oidc_enabled | bool else "htpasswd basic auth"),
+            ]
+            + (
+              [
+                "  Group  : add your user to '" + headlamp_oidc_admin_group + "' in Authentik",
+                "           Authentik Admin → Directory → Groups → " + headlamp_oidc_admin_group,
+              ] if headlamp_oidc_enabled | bool else []
+            )
+            + [
+              "  Fallback token login (select 'Token' in Headlamp UI):",
+              "  " + headlamp_token.stdout[:80] + ("..." if headlamp_token.stdout | length > 80 else ""),
+              "  Retrieve later:",
+              "  kubectl get secret headlamp-admin-token -n " + headlamp_namespace + " \\",
+              "    -o jsonpath='{.data.token}' | base64 -d",
+              "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            ]
+          }}

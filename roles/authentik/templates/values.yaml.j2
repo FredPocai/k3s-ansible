@@ -5,6 +5,12 @@ authentik:
   secret_key: "{{ authentik_secret_key }}"
   log_level: info
 
+  # authentik_bootstrap_token is stored in vault/secrets.yaml.
+  # On first startup Authentik creates an API token for akadmin with this value,
+  # allowing Ansible to configure providers/apps without manual UI steps.
+  # Generate: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+  token: "{{ authentik_bootstrap_token }}"
+
   # Bootstrap creates the initial admin akadmin user on first run.
   # Change the password via the UI after first login.
   bootstrap_email: "{{ authentik_bootstrap_email }}"

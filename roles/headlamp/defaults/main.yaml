@@ -1,2 +1,19 @@
 # ── Headlamp ──────────────────────────────────────────────────────
 headlamp_namespace: headlamp
+headlamp_hostname: "headlamp.{{ base_domain }}"
+
+# ── OIDC (Authentik) ──────────────────────────────────────────────
+# Set authentik_bootstrap_token in vault/secrets.yaml to enable OIDC.
+# When the token is absent the role falls back to htpasswd basic auth.
+headlamp_oidc_enabled: "{{ (authentik_bootstrap_token | default('')) | length > 0 }}"
+headlamp_oidc_client_id: headlamp
+# headlamp_oidc_client_secret  — set in vault/secrets.yaml
+
+# Authentik group whose members become cluster-admin via OIDC.
+# Create the group in Authentik and add users to it; the k8s
+# ClusterRoleBinding is created automatically by this role.
+headlamp_oidc_admin_group: k8s-admins
+
+# Prefix applied by the k3s oidc-groups-prefix arg.
+# The ClusterRoleBinding subject is "<prefix><group>".
+headlamp_oidc_groups_prefix: "oidc:"

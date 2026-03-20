@@ -1,0 +1,125 @@
+---
+# roles/headlamp/tasks/k3s-oidc.yaml
+#
+# Injects OIDC kube-apiserver-arg entries into /etc/rancher/k3s/config.yaml
+# on every cluster node, then restarts k3s serially (preserving etcd quorum).
+#
+# Also creates the ClusterRoleBinding that maps the OIDC admin group to
+# cluster-admin so that group members have full kubectl / Headlamp access.
+#
+# Safe to re-run — args are deduplicated before writing, and k3s is only
+# restarted when the file actually changed.
+#
+# Runs from the init node (inventory_hostname in k3s_init) with delegate_to
+# looping over groups['k3s_cluster'].
+
+# ── Write OIDC args to config.yaml on every node ─────────────────
+
+- name: Ensure /etc/rancher/k3s directory exists on all nodes
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    mode: "0755"
+  become: true
+  delegate_to: "{{ _node }}"
+  loop: "{{ groups['k3s_cluster'] }}"
+  loop_control:
+    loop_var: _node
+    label: "{{ _node }}"
+
+- name: Read existing /etc/rancher/k3s/config.yaml from each node
+  ansible.builtin.slurp:
+    src: /etc/rancher/k3s/config.yaml
+  register: _k3s_cfgs
+  become: true
+  failed_when: false          # file may not exist on a fresh install
+  delegate_to: "{{ _node }}"
+  loop: "{{ groups['k3s_cluster'] }}"
+  loop_control:
+    loop_var: _node
+    label: "{{ _node }}"
+
+- name: Merge OIDC kube-apiserver-arg entries into config.yaml on each node
+  ansible.builtin.copy:
+    dest: /etc/rancher/k3s/config.yaml
+    content: "{{ _merged | to_nice_yaml(indent=2) }}"
+    mode: "0600"
+  vars:
+    _raw: "{{ item.content | default('') | b64decode | trim }}"
+    # Parse existing YAML; fall back to empty dict if file was absent / empty
+    _base: "{{ (_raw | length > 0) | ternary((_raw | from_yaml) | default({}), {}) }}"
+    _want_args:
+      - "oidc-issuer-url=https://{{ authentik_hostname }}/application/o/{{ headlamp_oidc_client_id }}/"
+      - "oidc-client-id={{ headlamp_oidc_client_id }}"
+      - "oidc-username-claim=email"
+      - "oidc-groups-claim=groups"
+      - "oidc-groups-prefix={{ headlamp_oidc_groups_prefix }}"
+    _have_args: "{{ _base['kube-apiserver-arg'] | default([]) }}"
+    # Append only; unique removes duplicates so re-runs are idempotent
+    _merged: "{{ _base | combine({'kube-apiserver-arg': (_have_args + _want_args) | unique}) }}"
+  become: true
+  delegate_to: "{{ item._node }}"
+  loop: "{{ _k3s_cfgs.results }}"
+  loop_control:
+    label: "{{ item._node }}"
+  register: _k3s_updated
+
+# ── Serial restart — one node at a time to keep quorum ────────────
+# The loop itself is sequential; throttle: 1 prevents any parallel
+# execution if Ansible ever tries to run iterations concurrently.
+
+- name: Restart k3s on nodes where config.yaml changed
+  ansible.builtin.systemd:
+    name: k3s
+    state: restarted
+  become: true
+  delegate_to: "{{ item._node }}"
+  loop: "{{ _k3s_updated.results }}"
+  loop_control:
+    label: "{{ item._node }}"
+  when: item.changed
+  throttle: 1
+
+- name: Wait for k3s API server to accept connections after restart
+  ansible.builtin.wait_for:
+    port: 6443
+    host: "{{ hostvars[item._node]['ansible_host'] }}"
+    delay: 10
+    timeout: 120
+  delegate_to: localhost
+  loop: "{{ _k3s_updated.results }}"
+  loop_control:
+    label: "{{ item._node }}"
+  when: item.changed
+
+# ── RBAC — bind OIDC admin group to cluster-admin ─────────────────
+
+- name: Create ClusterRoleBinding for OIDC group → cluster-admin
+  ansible.builtin.shell: |
+    kubectl apply -f - <<EOF
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: oidc-{{ headlamp_oidc_admin_group }}
+      labels:
+        app.kubernetes.io/managed-by: ansible
+        app.kubernetes.io/component: headlamp-oidc
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: cluster-admin
+    subjects:
+      - kind: Group
+        name: "{{ headlamp_oidc_groups_prefix }}{{ headlamp_oidc_admin_group }}"
+        apiGroup: rbac.authorization.k8s.io
+    EOF
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: _crb_result
+  changed_when: '"configured" in _crb_result.stdout or "created" in _crb_result.stdout'
+
+- name: Print ClusterRoleBinding status
+  ansible.builtin.debug:
+    msg: "{{ _crb_result.stdout }}"

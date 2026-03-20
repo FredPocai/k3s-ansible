@@ -3,6 +3,36 @@
 
 replicaCount: 1
 
+{% if headlamp_oidc_enabled | bool %}
+# ── OIDC authentication (Authentik) ───────────────────────────────
+# Headlamp handles the OIDC flow and forwards the ID token to k8s.
+# k3s must be configured with matching oidc-issuer-url / oidc-client-id
+# (done by the k3s-oidc tasks in this role).
+config:
+  oidc:
+    clientID: "{{ headlamp_oidc_client_id }}"
+    clientSecret: "{{ headlamp_oidc_client_secret }}"
+    issuerURL: "https://{{ authentik_hostname }}/application/o/{{ headlamp_oidc_client_id }}/"
+    scopes: "openid profile email groups"
+
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+  hosts:
+    - host: {{ headlamp_hostname }}
+      paths:
+        - path: /
+          type: Prefix
+  tls:
+    - hosts:
+        - {{ headlamp_hostname }}
+      secretName: headlamp-tls
+
+{% else %}
+# ── htpasswd basic auth (fallback when Authentik is not deployed) ──
 ingress:
   enabled: true
   ingressClassName: nginx
@@ -11,18 +41,18 @@ ingress:
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     nginx.ingress.kubernetes.io/auth-type: basic
     nginx.ingress.kubernetes.io/auth-secret: headlamp-basic-auth
-    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"    
+    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
   hosts:
-    - host: headlamp.{{ base_domain }}
+    - host: {{ headlamp_hostname }}
       paths:
         - path: /
           type: Prefix
   tls:
     - hosts:
-        - headlamp.{{ base_domain }}
+        - {{ headlamp_hostname }}
       secretName: headlamp-tls
 
-extraManifests: 
+extraManifests:
   - |
     apiVersion: v1
     kind: Secret
@@ -31,3 +61,5 @@ extraManifests:
       namespace: headlamp
     data:
       auth: {{ lookup('file', 'htpasswd') | b64encode }}
+
+{% endif %}

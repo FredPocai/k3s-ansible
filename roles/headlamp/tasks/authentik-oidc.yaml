@@ -1,0 +1,254 @@
+---
+# roles/headlamp/tasks/authentik-oidc.yaml
+#
+# Configures Authentik as the OIDC provider for Headlamp.
+# Uses the Authentik REST API authenticated with authentik_bootstrap_token.
+#
+# Creates (idempotently):
+#   - A "groups" scope mapping (if missing) so the groups claim is in the ID token
+#   - A "k8s-admins" group (headlamp_oidc_admin_group)
+#   - An OAuth2/OIDC provider named "Headlamp"
+#   - An Application with slug "headlamp" linked to the provider
+#
+# Requires:
+#   authentik_bootstrap_token  — vault (AUTHENTIK_BOOTSTRAP_TOKEN set in Helm)
+#   authentik_hostname         — group_vars  (e.g. idp.pocai.net)
+#   headlamp_hostname          — group_vars / headlamp defaults
+#   headlamp_oidc_client_id    — headlamp defaults (headlamp)
+#   headlamp_oidc_client_secret — vault
+#
+# All tasks delegate_to: localhost (Authentik is reached via its public HTTPS URL).
+
+- name: Wait for Authentik API to be reachable
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/core/applications/"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+    status_code: [200]
+    validate_certs: true
+  register: _ak_check
+  until: _ak_check.status == 200
+  retries: 12
+  delay: 15
+  delegate_to: localhost
+
+# ── Discover built-in objects we need UUIDs for ───────────────────
+
+- name: Fetch Authentik authorization flows
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/flows/instances/?designation=authorization"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+    return_content: true
+  register: _ak_flows
+  delegate_to: localhost
+
+- name: Set authorization flow UUID (prefer implicit-consent, fall back to first)
+  ansible.builtin.set_fact:
+    _ak_auth_flow_pk: >-
+      {{
+        (_ak_flows.json.results
+        | selectattr('slug', 'search', 'implicit')
+        | map(attribute='pk') | list | first)
+        | default(_ak_flows.json.results[0].pk)
+      }}
+
+- name: Fetch Authentik certificate key pairs (for token signing)
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/crypto/certificatekeypairs/?has_key=true&include_details=false"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+    return_content: true
+  register: _ak_keys
+  delegate_to: localhost
+
+- name: Set signing key UUID
+  ansible.builtin.set_fact:
+    _ak_signing_key_pk: "{{ _ak_keys.json.results[0].pk }}"
+
+# ── Scope mappings ────────────────────────────────────────────────
+
+- name: Fetch all Authentik scope mappings
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/propertymappings/scope/"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+    return_content: true
+  register: _ak_scopes
+  delegate_to: localhost
+
+- name: Collect built-in scope UUIDs (openid, profile, email)
+  ansible.builtin.set_fact:
+    _ak_base_scope_pks: >-
+      {{
+        _ak_scopes.json.results
+        | selectattr('scope_name', 'in', ['openid', 'profile', 'email'])
+        | map(attribute='pk') | list
+      }}
+
+- name: Check if groups scope mapping exists
+  ansible.builtin.set_fact:
+    _ak_groups_scope: >-
+      {{
+        _ak_scopes.json.results
+        | selectattr('scope_name', 'equalto', 'groups')
+        | list | first | default({})
+      }}
+
+- name: Create groups scope mapping in Authentik
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/propertymappings/scope/"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "authentik default OAuth Mapping: OpenID 'groups'"
+      scope_name: "groups"
+      description: "Group membership claim for Kubernetes OIDC auth"
+      expression: "return list(request.user.ak_groups.values_list(\"name\", flat=True))"
+    status_code: [201]
+    return_content: true
+  register: _ak_groups_scope_created
+  delegate_to: localhost
+  when: _ak_groups_scope | length == 0
+
+- name: Resolve groups scope UUID
+  ansible.builtin.set_fact:
+    _ak_groups_scope_pk: >-
+      {{
+        _ak_groups_scope_created.json.pk
+        if (_ak_groups_scope | length == 0)
+        else _ak_groups_scope.pk
+      }}
+
+- name: Build full scope UUID list (openid + profile + email + groups)
+  ansible.builtin.set_fact:
+    _ak_all_scope_pks: "{{ _ak_base_scope_pks + [_ak_groups_scope_pk] }}"
+
+# ── k8s-admins group ─────────────────────────────────────────────
+
+- name: Check if {{ headlamp_oidc_admin_group }} group exists in Authentik
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/core/groups/?name={{ headlamp_oidc_admin_group | urlencode }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+    return_content: true
+  register: _ak_admin_group
+  delegate_to: localhost
+
+- name: Create {{ headlamp_oidc_admin_group }} group in Authentik
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/core/groups/"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ headlamp_oidc_admin_group }}"
+      is_superuser: false
+    status_code: [201]
+  delegate_to: localhost
+  when: _ak_admin_group.json.count == 0
+
+# ── OAuth2/OIDC provider ──────────────────────────────────────────
+
+- name: Check if Headlamp OAuth2 provider exists in Authentik
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/providers/oauth2/?name=Headlamp"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+    return_content: true
+  register: _ak_provider
+  delegate_to: localhost
+
+- name: Create Headlamp OAuth2/OIDC provider in Authentik
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/providers/oauth2/"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "Headlamp"
+      authorization_flow: "{{ _ak_auth_flow_pk }}"
+      client_type: "confidential"
+      client_id: "{{ headlamp_oidc_client_id }}"
+      client_secret: "{{ headlamp_oidc_client_secret }}"
+      redirect_uris:
+        - matching_mode: "strict"
+          url: "https://{{ headlamp_hostname }}/oidc-callback"
+      sub_mode: "hashed_user_id"
+      include_claims_in_id_token: true
+      signing_key: "{{ _ak_signing_key_pk }}"
+      property_mappings: "{{ _ak_all_scope_pks }}"
+      access_code_validity: "minutes=1"
+      access_token_validity: "minutes=5"
+      refresh_token_validity: "days=30"
+    status_code: [201]
+    return_content: true
+  register: _ak_provider_created
+  delegate_to: localhost
+  when: _ak_provider.json.count == 0
+  no_log: true
+
+- name: Resolve provider PK
+  ansible.builtin.set_fact:
+    _ak_provider_pk: >-
+      {{
+        _ak_provider_created.json.pk
+        if _ak_provider.json.count == 0
+        else _ak_provider.json.results[0].pk
+      }}
+
+# ── Application ───────────────────────────────────────────────────
+
+- name: Check if Headlamp application exists in Authentik
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/core/applications/?slug={{ headlamp_oidc_client_id }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+    return_content: true
+  register: _ak_app
+  delegate_to: localhost
+
+- name: Create Headlamp application in Authentik
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/core/applications/"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "Headlamp"
+      slug: "{{ headlamp_oidc_client_id }}"
+      provider: "{{ _ak_provider_pk }}"
+      meta_launch_url: "https://{{ headlamp_hostname }}"
+      meta_description: "Kubernetes cluster dashboard"
+      policy_engine_mode: "any"
+      open_in_new_tab: false
+    status_code: [201]
+  delegate_to: localhost
+  when: _ak_app.json.count == 0
+
+- name: Print Authentik OIDC configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "Authentik OIDC provider configured for Headlamp."
+      - "  Issuer URL : https://{{ authentik_hostname }}/application/o/{{ headlamp_oidc_client_id }}/"
+      - "  Client ID  : {{ headlamp_oidc_client_id }}"
+      - "  Redirect   : https://{{ headlamp_hostname }}/oidc-callback"
+      - "  Scopes     : openid profile email groups"
+      - "  Admin group: {{ headlamp_oidc_admin_group }}"
+      - "  ⚠  Add your user to '{{ headlamp_oidc_admin_group }}' in Authentik Admin → Directory → Groups"
