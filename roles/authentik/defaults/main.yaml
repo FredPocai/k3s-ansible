@@ -2,7 +2,7 @@
 # roles/authentik/defaults/main.yaml
 
 authentik_namespace: authentik
-authentik_chart_version: "2024.12.3"   # https://github.com/goauthentik/authentik/releases
+authentik_chart_version: "2026.2.1"   # https://github.com/goauthentik/authentik/releases
                                         # chart version tracks app version
 
 # Hostname — registered in OPNsense via opnsense-register-service

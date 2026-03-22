@@ -60,6 +60,7 @@
         helm upgrade --install headlamp headlamp/headlamp
         --namespace {{ headlamp_namespace }}
         --create-namespace
+        --version {{ headlamp_chart_version }}
         -f /tmp/headlamp-values.yaml
         --wait --timeout 5m
       environment:

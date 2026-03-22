@@ -73,10 +73,10 @@
     name: k3s
     state: restarted
   become: true
-  delegate_to: "{{ item._node }}"
+  delegate_to: "{{ item.item._node }}"
   loop: "{{ _k3s_updated.results }}"
   loop_control:
-    label: "{{ item._node }}"
+    label: "{{ item.item._node }}"
   when: item.changed
   throttle: 1
 
@@ -89,8 +89,8 @@
   delegate_to: localhost
   loop: "{{ _k3s_updated.results }}"
   loop_control:
-    label: "{{ item._node }}"
-  when: item.changed
+    label: "{{ item.item._node }}"
+  when: item.item.changed
 
 # ── RBAC — bind OIDC admin group to cluster-admin ─────────────────
 

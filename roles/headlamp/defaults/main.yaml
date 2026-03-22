@@ -1,3 +1,5 @@
+headlamp_chart_version: "0.39.0"
+
 # ── Headlamp ──────────────────────────────────────────────────────
 headlamp_namespace: headlamp
 headlamp_hostname: "headlamp.{{ base_domain }}"

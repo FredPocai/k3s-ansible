@@ -14,7 +14,8 @@ config:
     clientSecret: "{{ headlamp_oidc_client_secret }}"
     issuerURL: "https://{{ authentik_hostname }}/application/o/{{ headlamp_oidc_client_id }}/"
     scopes: "openid profile email groups"
-
+  extraArgs:
+    - --oidc-skip-tls-verify
 ingress:
   enabled: true
   ingressClassName: nginx

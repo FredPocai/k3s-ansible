@@ -11,13 +11,17 @@
 #   - An Application with slug "headlamp" linked to the provider
 #
 # Requires:
-#   authentik_bootstrap_token  — vault (AUTHENTIK_BOOTSTRAP_TOKEN set in Helm)
-#   authentik_hostname         — group_vars  (e.g. idp.pocai.net)
-#   headlamp_hostname          — group_vars / headlamp defaults
-#   headlamp_oidc_client_id    — headlamp defaults (headlamp)
+#   authentik_bootstrap_token   — vault
+#   authentik_hostname          — group_vars  (e.g. idp.pocai.net)
+#   headlamp_hostname           — group_vars / headlamp defaults
+#   headlamp_oidc_client_id     — headlamp defaults (headlamp)
 #   headlamp_oidc_client_secret — vault
 #
-# All tasks delegate_to: localhost (Authentik is reached via its public HTTPS URL).
+# API path notes (verified against authentik 2026.x source):
+#   Scope mappings    : /api/v3/propertymappings/provider/scope/  (moved from /propertymappings/scope/)
+#   invalidation_flow : now required on OAuth2 providers (ProviderSerializer extra_kwargs)
+#
+# All tasks delegate_to: localhost
 
 - name: Wait for Authentik API to be reachable
   ansible.builtin.uri:
@@ -33,27 +37,75 @@
   delay: 15
   delegate_to: localhost
 
-# ── Discover built-in objects we need UUIDs for ───────────────────
+# ── Flows ─────────────────────────────────────────────────────────
+# Fetch by slug directly — the list endpoint may return empty results
+# depending on how the API token was created in some Authentik versions.
 
-- name: Fetch Authentik authorization flows
+- name: Fetch implicit-consent authorization flow by slug
   ansible.builtin.uri:
-    url: "https://{{ authentik_hostname }}/api/v3/flows/instances/?designation=authorization"
+    url: "https://{{ authentik_hostname }}/api/v3/flows/instances/default-provider-authorization-implicit-consent/"
     method: GET
     headers:
       Authorization: "Bearer {{ authentik_bootstrap_token }}"
     return_content: true
-  register: _ak_flows
+    status_code: [200, 404]
+  register: _ak_flow_implicit
   delegate_to: localhost
 
-- name: Set authorization flow UUID (prefer implicit-consent, fall back to first)
+- name: Fetch explicit-consent authorization flow by slug (fallback)
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/flows/instances/default-provider-authorization-explicit-consent/"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+    return_content: true
+    status_code: [200, 404]
+  register: _ak_flow_explicit
+  delegate_to: localhost
+  when: _ak_flow_implicit.status == 404
+
+- name: Fail if neither authorization flow could be found
+  ansible.builtin.fail:
+    msg: >-
+      Could not find an authorization flow in Authentik.
+      Tried: default-provider-authorization-implicit-consent
+             default-provider-authorization-explicit-consent
+      Verify the API token belongs to a superuser:
+      Authentik Admin → Directory → Tokens → check User column.
+  when:
+    - _ak_flow_implicit.status == 404
+    - _ak_flow_explicit.status | default(404) == 404
+
+- name: Set authorization flow UUID
   ansible.builtin.set_fact:
     _ak_auth_flow_pk: >-
-      {{
-        (_ak_flows.json.results
-        | selectattr('slug', 'search', 'implicit')
-        | map(attribute='pk') | list | first)
-        | default(_ak_flows.json.results[0].pk)
-      }}
+      {{ _ak_flow_implicit.json.pk if _ak_flow_implicit.status == 200
+         else _ak_flow_explicit.json.pk }}
+
+- name: Fetch invalidation flow by slug
+  ansible.builtin.uri:
+    url: "https://{{ authentik_hostname }}/api/v3/flows/instances/default-provider-invalidation-flow/"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ authentik_bootstrap_token }}"
+    return_content: true
+    status_code: [200, 404]
+  register: _ak_flow_invalidation
+  delegate_to: localhost
+
+- name: Fail if invalidation flow not found
+  ansible.builtin.fail:
+    msg: >-
+      Could not find invalidation flow 'default-provider-invalidation-flow'.
+      This flow is required by Authentik 2025+ for OAuth2 provider creation.
+      Check Authentik Admin → Flows → Flows and verify the slug.
+  when: _ak_flow_invalidation.status == 404
+
+- name: Set invalidation flow UUID
+  ansible.builtin.set_fact:
+    _ak_invalidation_flow_pk: "{{ _ak_flow_invalidation.json.pk }}"
+
+# ── Certificate key pair ──────────────────────────────────────────
 
 - name: Fetch Authentik certificate key pairs (for token signing)
   ansible.builtin.uri:
@@ -70,10 +122,12 @@
     _ak_signing_key_pk: "{{ _ak_keys.json.results[0].pk }}"
 
 # ── Scope mappings ────────────────────────────────────────────────
+# Path changed in 2025+: /api/v3/propertymappings/provider/scope/
+# (was /api/v3/propertymappings/scope/)
 
-- name: Fetch all Authentik scope mappings
+- name: Fetch all Authentik provider scope mappings
   ansible.builtin.uri:
-    url: "https://{{ authentik_hostname }}/api/v3/propertymappings/scope/"
+    url: "https://{{ authentik_hostname }}/api/v3/propertymappings/provider/scope/"
     method: GET
     headers:
       Authorization: "Bearer {{ authentik_bootstrap_token }}"
@@ -101,7 +155,7 @@
 
 - name: Create groups scope mapping in Authentik
   ansible.builtin.uri:
-    url: "https://{{ authentik_hostname }}/api/v3/propertymappings/scope/"
+    url: "https://{{ authentik_hostname }}/api/v3/propertymappings/provider/scope/"
     method: POST
     headers:
       Authorization: "Bearer {{ authentik_bootstrap_token }}"
@@ -156,7 +210,7 @@
       is_superuser: false
     status_code: [201]
   delegate_to: localhost
-  when: _ak_admin_group.json.count == 0
+  when: _ak_admin_group.json.results | length == 0
 
 # ── OAuth2/OIDC provider ──────────────────────────────────────────
 
@@ -181,6 +235,7 @@
     body:
       name: "Headlamp"
       authorization_flow: "{{ _ak_auth_flow_pk }}"
+      invalidation_flow: "{{ _ak_invalidation_flow_pk }}"
       client_type: "confidential"
       client_id: "{{ headlamp_oidc_client_id }}"
       client_secret: "{{ headlamp_oidc_client_secret }}"
@@ -198,7 +253,7 @@
     return_content: true
   register: _ak_provider_created
   delegate_to: localhost
-  when: _ak_provider.json.count == 0
+  when: _ak_provider.json.results | length == 0
   no_log: true
 
 - name: Resolve provider PK
@@ -206,7 +261,7 @@
     _ak_provider_pk: >-
       {{
         _ak_provider_created.json.pk
-        if _ak_provider.json.count == 0
+        if _ak_provider.json.results| length == 0
         else _ak_provider.json.results[0].pk
       }}
 
@@ -240,7 +295,7 @@
       open_in_new_tab: false
     status_code: [201]
   delegate_to: localhost
-  when: _ak_app.json.count == 0
+  when: _ak_app.json.results | length == 0
 
 - name: Print Authentik OIDC configuration summary
   ansible.builtin.debug:
